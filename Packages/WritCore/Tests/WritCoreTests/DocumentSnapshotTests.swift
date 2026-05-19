@@ -50,6 +50,35 @@ struct DocumentSnapshotTests {
     func wordsUnicode() {
         #expect(DocumentSnapshot.wordCount(in: "café résumé 日本語") == 3)
     }
+
+    @Test("lineColumn handles empty string at any offset without crashing")
+    func lineColEmpty() {
+        #expect(DocumentSnapshot.lineColumn(in: "", utf16Offset: 0) == (1, 1))
+        // Offset past end must be clamped, not crash.
+        #expect(DocumentSnapshot.lineColumn(in: "", utf16Offset: 42) == (1, 1))
+    }
+
+    @Test("lineColumn counts column at end of line")
+    func lineColEnd() {
+        let (line, col) = DocumentSnapshot.lineColumn(in: "# Fresh", utf16Offset: 7)
+        #expect(line == 1)
+        #expect(col == 8)
+    }
+
+    @Test("lineColumn handles newlines")
+    func lineColNewlines() {
+        // offset 4 lands on the 'c' of "c\nd" after walking "a\nb\n"
+        let (line, col) = DocumentSnapshot.lineColumn(in: "a\nb\nc\nd", utf16Offset: 5)
+        #expect(line == 3)
+        #expect(col == 2)
+    }
+
+    @Test("lineColumn clamps negative and past-end offsets")
+    func lineColClamp() {
+        let src = "abc"
+        #expect(DocumentSnapshot.lineColumn(in: src, utf16Offset: -10) == (1, 1))
+        #expect(DocumentSnapshot.lineColumn(in: src, utf16Offset: 100) == (1, 4))
+    }
 }
 
 @Suite("LargeDocumentMode")

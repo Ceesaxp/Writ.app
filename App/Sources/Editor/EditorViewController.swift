@@ -1,4 +1,5 @@
 import Cocoa
+import WritCore
 
 private extension Comparable {
     func clamped(to limits: ClosedRange<Self>) -> Self {
@@ -145,17 +146,8 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     }
 
     private func lineColumn(forOffset offset: Int) -> (Int, Int) {
-        let text = currentSource
-        var line = 1
-        var column = 1
-        var idx = text.startIndex
-        var consumed = 0
-        while consumed < offset && idx < text.endIndex {
-            if text[idx] == "\n" { line += 1; column = 1 } else { column += 1 }
-            consumed += text.utf16.distance(from: text.utf16.startIndex, to: text.utf16.index(after: text.utf16.index(text.utf16.startIndex, offsetBy: consumed)))
-            idx = text.index(after: idx)
-        }
-        return (line, column)
+        let result = DocumentSnapshot.lineColumn(in: currentSource, utf16Offset: offset)
+        return (result.line, result.column)
     }
 
     // MARK: - Insert helpers (wired from Insert menu)

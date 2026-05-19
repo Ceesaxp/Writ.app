@@ -27,6 +27,24 @@ public struct DocumentSnapshot: Sendable, Hashable {
         return count
     }
 
+    /// Translate a UTF-16 code-unit offset (NSTextView selection semantics)
+    /// to (line, column). 1-indexed. Clamps `offset` into `[0, utf16.count]`
+    /// so empty-document edges can't trip a precondition crash.
+    public static func lineColumn(in source: String, utf16Offset offset: Int) -> (line: Int, column: Int) {
+        let utf16 = source.utf16
+        let target = max(0, min(offset, utf16.count))
+        var line = 1
+        var column = 1
+        var i = utf16.startIndex
+        var consumed = 0
+        while consumed < target, i < utf16.endIndex {
+            if utf16[i] == 0x0A { line += 1; column = 1 } else { column += 1 }
+            i = utf16.index(after: i)
+            consumed += 1
+        }
+        return (line, column)
+    }
+
     /// Approximate word count. Single linear scan over Unicode scalars
     /// treating any run of letters/digits as one word — matches Pages /
     /// Microsoft Word behavior closely enough for a status-bar readout and
