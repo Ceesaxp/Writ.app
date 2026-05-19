@@ -54,7 +54,7 @@ Done:
 - [x] PlantUML fence recognized; rendered as source with non-blocking notice
 
 Remaining:
-- [ ] Referenced `.svg` image support via standard `![](image.svg)` syntax (needs WKWebView read-access scope expansion to document directory)
+- [ ] Referenced `.svg` / `.png` / `.jpg` image support via standard `![](image.svg)` syntax — initial attempt (commit `66f4cfe`) widened WKWebView's `allowingReadAccessTo` to the common ancestor of bundle and document dir, but for sandboxed apps WebKit rejects any URL outside the sandbox grant ("Ignoring request to load this main resource because it is outside the sandbox") and the preview goes blank. Reverted in `<NEXT>`. Proper fix is a `WKURLSchemeHandler` for `writ-doc://` that resolves against the document's security-scoped URL.
 - [ ] Preview HTML sanitization pass (defense in depth — content already comes from a trusted parser, but bare inline HTML in source bypasses parser sanitization)
 - [ ] Two-way scroll sync with feedback-suppression
 - [ ] Export preserving rendered math/mermaid (capture rendered SVG from live preview into export HTML)

@@ -124,6 +124,19 @@ final class WritDocument: NSDocument {
         panel.nameFieldStringValue = (displayName as NSString?)?.deletingPathExtension ?? "export"
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
+            controller.statusBar.setExportStatus("Exporting PDF…")
+            controller.preview.onExportFinished = { [weak controller] finishedURL, ok in
+                guard let controller else { return }
+                if ok {
+                    controller.statusBar.setExportStatus("Exported \(finishedURL.lastPathComponent)")
+                } else {
+                    controller.statusBar.setExportStatus("PDF export failed")
+                }
+                // Clear the status message after a few seconds.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak controller] in
+                    controller?.statusBar.setExportStatus(nil)
+                }
+            }
             controller.preview.exportPDF(to: url)
         }
     }

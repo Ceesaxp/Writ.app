@@ -81,33 +81,12 @@ final class PreviewViewController: NSViewController {
             previewLog.error("failed to find preview shell in bundle")
             return
         }
-        // The widest enclosing directory that contains both the shell and the
-        // document gives WKWebView permission to load images that live next
-        // to the document. Falls back to the bundle's Resources when no doc
-        // URL is known yet.
-        let accessURL = widestAccessScope(forShell: indexURL, documentDir: documentDirectory)
+        // The read-access scope must be inside the app's sandbox grant or
+        // WebKit refuses to load even the shell itself. Bundle Resources
+        // covers the shell, vendor JS, and CSS. Document-relative images
+        // need a custom URL scheme handler (deferred — tracked in TODO M2).
+        let accessURL = Bundle.main.resourceURL ?? indexURL.deletingLastPathComponent()
         webView.loadFileURL(indexURL, allowingReadAccessTo: accessURL)
-    }
-
-    private func widestAccessScope(forShell shellURL: URL, documentDir: URL?) -> URL {
-        guard let documentDir else {
-            return Bundle.main.resourceURL ?? shellURL.deletingLastPathComponent()
-        }
-        let bundleResources = Bundle.main.resourceURL ?? shellURL.deletingLastPathComponent()
-        return commonAncestor(bundleResources, documentDir)
-    }
-
-    private func commonAncestor(_ a: URL, _ b: URL) -> URL {
-        let aComponents = a.standardizedFileURL.pathComponents
-        let bComponents = b.standardizedFileURL.pathComponents
-        var common: [String] = []
-        for (x, y) in zip(aComponents, bComponents) {
-            if x == y { common.append(x) } else { break }
-        }
-        if common.isEmpty || common == ["/"] {
-            return URL(fileURLWithPath: "/")
-        }
-        return URL(fileURLWithPath: common.joined(separator: "/"))
     }
 
     func didFinishNavigationCallback() {
@@ -149,6 +128,14 @@ final class PreviewViewController: NSViewController {
             if let r = body["revision"] as? UInt64 {
                 lastRenderedRevision = DocumentRevision(r)
                 onRendered?(lastRenderedRevision)
+            }
+        case "console":
+            let level = body["level"] as? String ?? "log"
+            let message = body["message"] as? String ?? ""
+            if level == "error" {
+                previewLog.error("JS: \(message, privacy: .public)")
+            } else {
+                previewLog.notice("JS \(level, privacy: .public): \(message, privacy: .public)")
             }
         default:
             break
@@ -210,28 +197,53 @@ final class PreviewViewController: NSViewController {
     /// Save the preview as a paginated PDF.
     ///
     /// `WKPDFConfiguration` always produces a single-page PDF the full height
-    /// of the content. For real pagination at standard page sizes we drive
-    /// `WKWebView.printOperation(with:)` instead and tell `NSPrintInfo` to
-    /// save to PDF.
-    func exportPDF(to url: URL) {
-        let info = NSPrintInfo()
-        info.jobDisposition = .save
-        info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url as NSURL
-        info.paperSize = NSSize(width: 612, height: 792) // US Letter
-        info.topMargin = 36
-        info.bottomMargin = 36
-        info.leftMargin = 36
-        info.rightMargin = 36
-        info.orientation = .portrait
-        info.horizontalPagination = .fit
-        info.verticalPagination = .automatic
-        info.isHorizontallyCentered = false
-        info.isVerticallyCentered = false
+    /// of the content, so for real pagination at US Letter we drive
+    /// `WKWebView.printOperation(with:)` and tell `NSPrintInfo` to save to
+    /// PDF.
+    ///
+    /// The print operation is dispatched async with a short settle delay so
+    /// that:
+    ///   1. The NSSavePanel sheet is fully dismissed before the runloop has
+    ///      to service the WebContent IPC the print needs (calling
+    ///      `op.run()` from inside the save panel's completion handler
+    ///      deadlocks on documents with heavy async JS rendering such as
+    ///      Mermaid diagrams).
+    ///   2. Any in-flight Mermaid/KaTeX renders have a chance to settle so
+    ///      they appear in the captured pages.
+    ///
+    /// Completion is reported through `onExportFinished` so the UI can clear
+    /// any "Exporting…" indicator.
+    var onExportFinished: ((URL, Bool) -> Void)?
 
-        let op = webView.printOperation(with: info)
-        op.showsPrintPanel = false
-        op.showsProgressPanel = false
-        op.run()
+    func exportPDF(to url: URL) {
+        let host = webView
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let host else {
+                self?.onExportFinished?(url, false)
+                return
+            }
+            let info = NSPrintInfo()
+            info.jobDisposition = .save
+            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url as NSURL
+            info.paperSize = NSSize(width: 612, height: 792) // US Letter
+            info.topMargin = 36
+            info.bottomMargin = 36
+            info.leftMargin = 36
+            info.rightMargin = 36
+            info.orientation = .portrait
+            info.horizontalPagination = .fit
+            info.verticalPagination = .automatic
+            info.isHorizontallyCentered = false
+            info.isVerticallyCentered = false
+
+            let op = host.printOperation(with: info)
+            op.showsPrintPanel = false
+            op.showsProgressPanel = false
+            let started = op.run()
+            let exists = FileManager.default.fileExists(atPath: url.path)
+            previewLog.notice("PDF export run() returned \(started), file exists: \(exists)")
+            self?.onExportFinished?(url, exists)
+        }
     }
 }
 

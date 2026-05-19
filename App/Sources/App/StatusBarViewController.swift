@@ -51,6 +51,18 @@ final class StatusBarViewController: NSViewController {
         positionLabel.stringValue = "Ln \(line), Col \(column)"
     }
 
+    /// Override the state label with a transient export-progress message.
+    /// Pass `nil` to clear and let normal render-status updates take over again.
+    private var exportStatus: String?
+    func setExportStatus(_ status: String?) {
+        exportStatus = status
+        if let status {
+            stateLabel.stringValue = status
+        } else {
+            stateLabel.stringValue = "Ready"
+        }
+    }
+
     func update(byteCount: Int?, lineCount: Int?, wordCount: Int? = nil, status: RenderStatus?) {
         if let byteCount {
             lastByteCount = byteCount
@@ -62,7 +74,9 @@ final class StatusBarViewController: NSViewController {
             lastWordCount = wordCount
         }
         countsLabel.stringValue = formatCounts(bytes: lastByteCount, lines: lastLineCount, words: lastWordCount)
-        if let status {
+        // An export-in-progress message takes priority over the regular render
+        // status until it's explicitly cleared.
+        if let status, exportStatus == nil {
             stateLabel.stringValue = formatStatus(status)
         }
     }
