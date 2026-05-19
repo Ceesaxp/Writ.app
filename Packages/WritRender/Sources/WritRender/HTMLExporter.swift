@@ -7,7 +7,11 @@ import WritParser
 public enum HTMLExporter {
     public static func render(parsed: ParsedDocument?, theme: String, css: String) -> String {
         let body = parsed?.html ?? "<!-- no rendered document available -->"
-        return """
+        return render(body: body, theme: theme, css: css)
+    }
+
+    public static func render(body: String, theme: String, css: String) -> String {
+        """
         <!DOCTYPE html>
         <html lang="en">
         <head>

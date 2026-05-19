@@ -100,14 +100,19 @@ final class WritDocument: NSDocument {
     // MARK: - Export commands (wired to menu)
 
     @IBAction func exportHTML(_ sender: Any?) {
-        guard let window = windowControllers.first?.window else { return }
+        guard let window = windowControllers.first?.window,
+              let controller = windowControllers.first as? DocumentWindowController else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType.html]
         panel.nameFieldStringValue = (displayName as NSString?)?.deletingPathExtension ?? "export"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
-            let document = self.bridge.currentParsedDocument
-            ExportService.exportHTML(parsed: document, theme: self.bridge.theme, to: url)
+            ExportService.exportHTML(
+                preview: controller.preview,
+                parsed: self.bridge.currentParsedDocument,
+                theme: self.bridge.theme,
+                to: url
+            )
         }
     }
 

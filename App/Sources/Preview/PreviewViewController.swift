@@ -164,6 +164,22 @@ final class PreviewViewController: NSViewController {
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
+    /// Asks the preview JS to return the current `#writ-content` innerHTML.
+    /// Used by the HTML export pipeline so rendered math/mermaid output is
+    /// captured in the export rather than the unrendered placeholders.
+    func capturedContentHTML(completion: @escaping (String?) -> Void) {
+        guard isReady else { completion(nil); return }
+        let js = "(function(){var el=document.getElementById('writ-content');return el?el.innerHTML:''})()"
+        webView.evaluateJavaScript(js) { value, error in
+            if let error {
+                previewLog.error("capture failed: \(error.localizedDescription, privacy: .public)")
+                completion(nil)
+                return
+            }
+            completion(value as? String)
+        }
+    }
+
     // MARK: - PDF export
 
     func exportPDF(to url: URL) {
