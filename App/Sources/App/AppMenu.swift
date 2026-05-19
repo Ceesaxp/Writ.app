@@ -106,6 +106,10 @@ enum AppMenu {
         split.keyEquivalentModifierMask = [.command, .option]
         viewMenu.addItem(split)
         viewMenu.addItem(.separator())
+        let lineNumbers = NSMenuItem(title: "Show Line Numbers", action: #selector(DocumentWindowController.toggleLineNumbers(_:)), keyEquivalent: "l")
+        lineNumbers.keyEquivalentModifierMask = [.command, .option]
+        viewMenu.addItem(lineNumbers)
+        viewMenu.addItem(.separator())
         let refresh = NSMenuItem(title: "Refresh Preview", action: #selector(DocumentWindowController.refreshPreview(_:)), keyEquivalent: "r")
         viewMenu.addItem(refresh)
 

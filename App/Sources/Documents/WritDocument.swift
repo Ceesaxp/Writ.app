@@ -38,6 +38,71 @@ final class WritDocument: NSDocument {
         addWindowController(controller)
     }
 
+    // MARK: - External file change detection (M3)
+
+    /// `NSDocument` already implements `NSFilePresenter` and registers with
+    /// `NSFileCoordinator` when it has a file URL. The OS notifies us via
+    /// `presentedItemDidChange()` whenever another process writes to the
+    /// file. Default behavior is to do nothing visible; we override to
+    /// surface the change to the user and offer to revert.
+    override func presentedItemDidChange() {
+        // Hops onto main because file-presenter callbacks come in on the
+        // file coordinator's queue.
+        DispatchQueue.main.async { [weak self] in
+            self?.handleExternalChange()
+        }
+    }
+
+    private var externalChangePromptActive = false
+
+    private func handleExternalChange() {
+        guard let url = fileURL, !externalChangePromptActive else { return }
+        // Skip if we have unsaved local edits — we don't want to silently
+        // clobber the user's work. The MVP behavior is conservative: prompt
+        // and let the user choose.
+        let isDirty = isDocumentEdited
+        externalChangePromptActive = true
+        let alert = NSAlert()
+        alert.messageText = "“\(url.lastPathComponent)” was changed by another application."
+        if isDirty {
+            alert.informativeText = "You have unsaved changes. Reload from disk and lose your edits, or keep your version?"
+            alert.addButton(withTitle: "Reload from Disk")
+            alert.addButton(withTitle: "Keep My Changes")
+        } else {
+            alert.informativeText = "Would you like to reload the file?"
+            alert.addButton(withTitle: "Reload")
+            alert.addButton(withTitle: "Ignore")
+        }
+        alert.alertStyle = .informational
+
+        if let window = windowControllers.first?.window {
+            alert.beginSheetModal(for: window) { [weak self] response in
+                defer { self?.externalChangePromptActive = false }
+                guard response == .alertFirstButtonReturn else { return }
+                self?.reloadFromDisk()
+            }
+        } else {
+            let response = alert.runModal()
+            externalChangePromptActive = false
+            if response == .alertFirstButtonReturn { reloadFromDisk() }
+        }
+    }
+
+    private func reloadFromDisk() {
+        guard let url = fileURL else { return }
+        do {
+            try revert(toContentsOf: url, ofType: fileType ?? "public.plain-text")
+            windowControllers
+                .compactMap { $0 as? DocumentWindowController }
+                .forEach { $0.applyLoadedSource() }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not reload “\(url.lastPathComponent)”."
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
     // MARK: - File IO
 
     override func read(from url: URL, ofType typeName: String) throws {

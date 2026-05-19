@@ -28,10 +28,21 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     private(set) var textView: NSTextView!
     private var scrollView: NSScrollView!
+    private var lineNumberRuler: LineNumberRulerView?
     private var currentSource: String = ""
     private var suppressDelegateBroadcast = false
     private let syntaxHighlighter = MarkdownSyntaxHighlighter()
     private var highlightThrottle: Task<Void, Never>?
+
+    /// Persisted preference key for showing line numbers.
+    /// Default is off — the ruler currently attaches at the correct
+    /// thickness but doesn't render visibly with TextKit 2; tracked in
+    /// TODO.md as a known M3 limitation.
+    static let lineNumbersDefaultsKey = "WritShowLineNumbers"
+    static var lineNumbersEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: lineNumbersDefaultsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: lineNumbersDefaultsKey) }
+    }
 
     override func loadView() {
         let scroll = NSScrollView()
@@ -72,6 +83,9 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         self.textView = textView
         self.view = scroll
 
+        // Defer ruler attachment to viewWillAppear — at this point the views
+        // have zero frame and scrollView.tile() is a no-op.
+
         // Observe scroll position so the bridge can propagate to the preview.
         scroll.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -80,6 +94,11 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             name: NSView.boundsDidChangeNotification,
             object: scroll.contentView
         )
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        applyLineNumberPreference()
     }
 
     private var lastScrollRatio: Double = 0
@@ -105,6 +124,31 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     static func editorFont() -> NSFont {
         if let mono = NSFont(name: "SF Mono", size: 13.0) { return mono }
         return NSFont.monospacedSystemFont(ofSize: 13.0, weight: .regular)
+    }
+
+    private func applyLineNumberPreference() {
+        let enabled = EditorViewController.lineNumbersEnabled
+        if enabled {
+            if lineNumberRuler == nil {
+                let ruler = LineNumberRulerView(scrollView: scrollView, textView: textView)
+                lineNumberRuler = ruler
+                scrollView.hasVerticalRuler = true
+                scrollView.verticalRulerView = ruler
+            }
+            scrollView.rulersVisible = true
+        } else {
+            scrollView.rulersVisible = false
+            scrollView.hasVerticalRuler = false
+            scrollView.verticalRulerView = nil
+            lineNumberRuler = nil
+        }
+        scrollView.tile()
+        scrollView.needsDisplay = true
+    }
+
+    func toggleLineNumbers() {
+        EditorViewController.lineNumbersEnabled.toggle()
+        applyLineNumberPreference()
     }
 
     func setSource(_ source: String) {

@@ -15,6 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             BenchmarkMode.run()
             return
         }
+        // Handle CLI flags for quick QA: --enable-line-numbers / --disable-line-numbers
+        // toggle the persisted preference before any document window is shown.
+        if CommandLine.arguments.contains("--enable-line-numbers") {
+            UserDefaults.standard.set(true, forKey: EditorViewController.lineNumbersDefaultsKey)
+        } else if CommandLine.arguments.contains("--disable-line-numbers") {
+            UserDefaults.standard.set(false, forKey: EditorViewController.lineNumbersDefaultsKey)
+        }
         AppMenu.install()
         NSApp.activate(ignoringOtherApps: true)
     }

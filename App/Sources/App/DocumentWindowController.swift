@@ -180,6 +180,18 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         editor.insertMermaidBlock()
     }
 
+    @objc func toggleLineNumbers(_ sender: Any?) {
+        editor.toggleLineNumbers()
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleLineNumbers(_:)) {
+            item.state = EditorViewController.lineNumbersEnabled ? .on : .off
+            return true
+        }
+        return true
+    }
+
     private func setLayout(_ mode: LayoutMode) {
         layoutMode = mode
         let editorItem = splitController.splitViewItems[0]
