@@ -63,14 +63,17 @@ Remaining:
 
 ---
 
-## M3 — P2 workflow + robustness
+## M3 — P2 workflow + robustness (in progress, commit `04ce009`)
 
-(Untouched. Plan items per MVP plan §3 M3.)
+Done:
+- [x] **External file change detection** — `WritDocument.presentedItemDidChange` shows an NSAlert sheet, with the unsaved-edits path warning the user before clobbering local changes; clean docs get a simpler Reload/Ignore prompt; `revert(toContentsOf:)` + `applyLoadedSource` keeps editor and preview in lock-step.
 
+In progress / known issues:
+- [/] **Optional line numbers** — `LineNumberRulerView` (`NSRulerView` walking `NSTextLayoutManager.enumerateTextLayoutFragments`) is in place and toggle-able from View > Show Line Numbers (⌥⌘L). Ruler attaches at correct thickness (42pt) but is not visually rendered — suspected NSRulerView / TextKit 2 interop issue. Default off. Replacement plan: custom NSView placed in a container alongside the scroll view, not via NSRulerView.
+
+Remaining:
 - [ ] Incremental / range-aware editor syntax highlighting (currently regex-pass with 80 ms debounce, 500 KB cap)
-- [ ] Optional line numbers
 - [ ] Better scroll sync (block-aware rather than proportional)
-- [ ] External file change detection
 - [ ] Improved find/replace behavior for large documents
 - [ ] Improved HTML export bundling (relative images, asset directory)
 - [ ] Simple folder open + quick open
