@@ -106,7 +106,17 @@ final class PreviewViewController: NSViewController {
         return URL(fileURLWithPath: common.joined(separator: "/"))
     }
 
-    func didFinishNavigationCallback() {}
+    func didFinishNavigationCallback() {
+        // Probe-back: if the JS side hasn't announced "ready" within a short
+        // window after navigation finishes, ask it to. Defends against a cold
+        // WebKit launch where the first script-message round-trip is dropped.
+        let probeWebView = webView
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self, !self.isReady else { return }
+            previewLog.notice("ready signal missing after 2s — probing")
+            probeWebView?.evaluateJavaScript("window.Writ && window.Writ.markReady && window.Writ.markReady()", completionHandler: nil)
+        }
+    }
 
     func didFailNavigationCallback(_ error: Error) {
         previewLog.error("navigation failed: \(error.localizedDescription, privacy: .public)")
