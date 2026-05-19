@@ -1,0 +1,173 @@
+:root {
+  color-scheme: light dark;
+  --writ-fg: #1a1a1a;
+  --writ-fg-muted: #525560;
+  --writ-bg: #ffffff;
+  --writ-bg-alt: #f6f7f9;
+  --writ-border: #d6d8de;
+  --writ-link: #0a66c2;
+  --writ-code-bg: #f3f4f7;
+  --writ-code-fg: #1f2328;
+  --writ-blockquote-border: #d6d8de;
+  --writ-blockquote-fg: #525560;
+  --writ-accent: #5a47ff;
+  --writ-warning-bg: #fff7e6;
+  --writ-warning-fg: #8a5a00;
+  --writ-error-bg: #ffeaea;
+  --writ-error-fg: #8a1a1a;
+  --writ-body-font: -apple-system, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --writ-mono-font: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  --writ-content-max: 78ch;
+  --writ-line-height: 1.55;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --writ-fg: #e6e8ec;
+    --writ-fg-muted: #a3a8b3;
+    --writ-bg: #1a1c20;
+    --writ-bg-alt: #23262c;
+    --writ-border: #34373f;
+    --writ-link: #69b1ff;
+    --writ-code-bg: #23262c;
+    --writ-code-fg: #e6e8ec;
+    --writ-blockquote-border: #34373f;
+    --writ-blockquote-fg: #a3a8b3;
+    --writ-accent: #9a87ff;
+    --writ-warning-bg: #3a2e10;
+    --writ-warning-fg: #ffcb74;
+    --writ-error-bg: #3a1414;
+    --writ-error-fg: #ff8a8a;
+  }
+}
+
+html, body {
+  background: var(--writ-bg);
+  color: var(--writ-fg);
+  font-family: var(--writ-body-font);
+  font-size: 15px;
+  line-height: var(--writ-line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+#writ-content {
+  max-width: var(--writ-content-max);
+  margin: 2rem auto 4rem;
+  padding: 0 2rem;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-top: 1.6em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+h1 { font-size: 2.0rem; border-bottom: 1px solid var(--writ-border); padding-bottom: 0.3em; }
+h2 { font-size: 1.5rem; border-bottom: 1px solid var(--writ-border); padding-bottom: 0.25em; }
+h3 { font-size: 1.22rem; }
+h4 { font-size: 1.05rem; }
+h5, h6 { font-size: 1.0rem; color: var(--writ-fg-muted); }
+p { margin: 0 0 1em; }
+a { color: var(--writ-link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+ul, ol { padding-left: 1.6em; margin: 0 0 1em; }
+li { margin: 0.18em 0; }
+.task-list-item { list-style: none; margin-left: -1.4em; }
+.task-list-item input { margin-right: 0.4em; }
+
+blockquote {
+  margin: 0 0 1em;
+  padding: 0.4em 1em;
+  border-left: 3px solid var(--writ-blockquote-border);
+  color: var(--writ-blockquote-fg);
+  background: var(--writ-bg-alt);
+}
+
+hr { border: 0; border-top: 1px solid var(--writ-border); margin: 2em 0; }
+
+code, pre { font-family: var(--writ-mono-font); font-size: 0.92em; }
+code { background: var(--writ-code-bg); color: var(--writ-code-fg); padding: 0.12em 0.35em; border-radius: 4px; }
+pre {
+  background: var(--writ-code-bg);
+  color: var(--writ-code-fg);
+  padding: 0.9em 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0 0 1em;
+}
+pre code { background: transparent; padding: 0; }
+
+table { border-collapse: collapse; margin: 0 0 1em; width: 100%; }
+th, td { border: 1px solid var(--writ-border); padding: 0.4em 0.7em; text-align: left; }
+th { background: var(--writ-bg-alt); }
+tr:nth-child(even) td { background: var(--writ-bg-alt); }
+
+img { max-width: 100%; height: auto; }
+
+/* Technical blocks */
+.writ-math-block, .writ-math-inline { font-family: serif; }
+.writ-math-block { display: block; margin: 0.8em 0; text-align: center; }
+.writ-math-inline { display: inline-block; }
+.writ-math-error {
+  display: inline-block;
+  background: var(--writ-error-bg);
+  color: var(--writ-error-fg);
+  padding: 0 0.4em;
+  border-radius: 4px;
+  font-family: var(--writ-mono-font);
+  font-size: 0.85em;
+}
+
+.writ-mermaid {
+  display: block;
+  margin: 1em auto;
+  text-align: center;
+  background: transparent;
+}
+.writ-mermaid svg { max-width: 100%; height: auto; }
+.writ-mermaid-error {
+  background: var(--writ-error-bg);
+  color: var(--writ-error-fg);
+  padding: 0.6em 0.9em;
+  border-radius: 6px;
+  font-family: var(--writ-mono-font);
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
+
+.writ-plantuml {
+  background: var(--writ-bg-alt);
+  border: 1px dashed var(--writ-border);
+  border-radius: 6px;
+  padding: 0.6em 0.9em;
+  margin: 1em 0;
+}
+.writ-plantuml-notice {
+  color: var(--writ-warning-fg);
+  background: var(--writ-warning-bg);
+  display: inline-block;
+  font-size: 0.82em;
+  padding: 0.15em 0.5em;
+  border-radius: 4px;
+  margin-bottom: 0.5em;
+}
+.writ-plantuml pre {
+  margin: 0;
+  background: transparent;
+}
+
+/* Loading shimmer for pending technical blocks */
+.writ-pending {
+  display: inline-block;
+  min-width: 1.2em;
+  min-height: 1em;
+  background: linear-gradient(90deg, var(--writ-bg-alt) 25%, var(--writ-border) 50%, var(--writ-bg-alt) 75%);
+  background-size: 200% 100%;
+  animation: writ-shimmer 1.2s linear infinite;
+  border-radius: 3px;
+}
+@keyframes writ-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}

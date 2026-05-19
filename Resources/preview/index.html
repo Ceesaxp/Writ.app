@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- CSP intentionally omitted; sandbox + WKWebView's app-scope file access provides the boundary. M2 will revisit. -->
+<title>Writ Preview</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="vendor/katex/katex.min.css" disabled id="katex-css">
+<link rel="stylesheet" href="vendor/highlight/github.min.css" id="highlight-css">
+<style>
+  /* In-shell rules that must apply before theme.css for FOUC safety. */
+  html, body { margin: 0; padding: 0; }
+  body.writ-loading > #writ-content { opacity: 0; }
+  body.writ-ready > #writ-content { opacity: 1; transition: opacity 80ms ease-out; }
+</style>
+</head>
+<body class="writ-loading">
+<main id="writ-content"></main>
+<script src="vendor/highlight/highlight.min.js" defer></script>
+<script src="vendor/katex/katex.min.js" defer></script>
+<script src="vendor/katex/contrib/auto-render.min.js" defer></script>
+<script src="vendor/mermaid/mermaid.min.js" defer></script>
+<script src="writ.js" defer></script>
+</body>
+</html>

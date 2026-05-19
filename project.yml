@@ -1,0 +1,116 @@
+name: Writ
+options:
+  bundleIdPrefix: org.ceesaxp
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+  generateEmptyDirectories: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: YES
+    DEVELOPMENT_TEAM: Q34D9AYJ95
+    PRODUCT_NAME: Writ
+  configs:
+    Debug:
+      CODE_SIGN_STYLE: Manual
+      CODE_SIGN_IDENTITY: "-"
+      CODE_SIGNING_REQUIRED: NO
+      CODE_SIGNING_ALLOWED: NO
+    Release:
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: "Developer ID Application"
+packages:
+  WritCore:
+    path: Packages/WritCore
+  WritParser:
+    path: Packages/WritParser
+  WritRender:
+    path: Packages/WritRender
+targets:
+  Writ:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+        type: folder
+      - path: Resources/preview
+        type: folder
+        buildPhase: resources
+    resources:
+      - path: App/Resources/Assets.xcassets
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Writ
+        CFBundleName: Writ
+        CFBundleIdentifier: org.ceesaxp.Writ
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: en
+        CFBundlePackageType: APPL
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: "© 2026 Andrei Popov"
+        NSPrincipalClass: NSApplication
+        NSSupportsAutomaticTermination: true
+        NSSupportsSuddenTermination: false
+        NSMainStoryboardFile: ""
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Markdown Document
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - net.daringfireball.markdown
+              - org.commonmark.markdown
+              - public.markdown
+            LSTypeIsPackage: false
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).WritDocument
+          - CFBundleTypeName: Plain Text Document
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.plain-text
+              - public.text
+            LSTypeIsPackage: false
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).WritDocument
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: net.daringfireball.markdown
+            UTTypeDescription: Markdown Document
+            UTTypeConformsTo:
+              - public.plain-text
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - md
+                - markdown
+                - mdown
+              public.mime-type:
+                - text/markdown
+    entitlements:
+      path: App/Writ.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.bookmarks.app-scope: true
+        com.apple.security.network.client: false
+    dependencies:
+      - package: WritCore
+      - package: WritParser
+      - package: WritRender
+    settings:
+      base:
+        COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/Info.plist
+    scheme:
+      testTargets: []
+      gatherCoverageData: false
+      commandLineArguments: {}
+      environmentVariables: []
