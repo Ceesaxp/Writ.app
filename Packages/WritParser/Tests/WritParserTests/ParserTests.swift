@@ -128,6 +128,47 @@ struct ParserTests {
         #expect(p.html.contains("<tbody>"))
     }
 
+    @Test("Span extractor finds heading, code block, emphasis, strong")
+    func spans() {
+        let src = """
+        # Heading 1
+
+        Some **strong** and *emphasis* and `code`.
+
+        ```swift
+        let x = 1
+        ```
+
+        $$x^2 + y^2$$
+        """
+        let extractor = SyntaxSpanExtractor()
+        let spans = extractor.extract(from: src)
+        let kinds = Set(spans.map(\.kind))
+        #expect(kinds.contains(.heading))
+        #expect(kinds.contains(.strong))
+        #expect(kinds.contains(.emphasis))
+        #expect(kinds.contains(.inlineCode))
+        #expect(kinds.contains(.codeBlock))
+        #expect(kinds.contains(.mathBlock))
+    }
+
+    @Test("Span extractor recognises list/task markers and tables")
+    func spansLineLevel() {
+        let src = """
+        - item
+        - [x] done
+        - [ ] todo
+
+        | a | b |
+        | - | - |
+        | 1 | 2 |
+        """
+        let spans = SyntaxSpanExtractor().extract(from: src)
+        #expect(spans.contains { $0.kind == .listMarker })
+        #expect(spans.contains { $0.kind == .taskMarker })
+        #expect(spans.contains { $0.kind == .tableSeparator })
+    }
+
     @Test("Table column alignment markers reach HTML")
     func tableAlignment() throws {
         let src = """
