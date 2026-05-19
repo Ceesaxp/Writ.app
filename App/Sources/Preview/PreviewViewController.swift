@@ -273,33 +273,72 @@ final class PreviewViewController: NSViewController {
             op.showsProgressPanel = false
             previewLog.notice("[pdf] op built, showsPrintPanel=\(op.showsPrintPanel) showsProgressPanel=\(op.showsProgressPanel)")
 
-            // Set up a heartbeat that pings every second while `op.run()` is
-            // executing. We MUST avoid touching the Swift `Logger` from a
-            // background thread inside this closure — under Swift 6 strict
-            // concurrency the closure inherits MainActor isolation from the
-            // enclosing function and asserts when fired off-main (crash
-            // report Writ-2026-05-19-201711.ips). The lower-level `os_log`
-            // is a C function and works fine from any thread.
+            // `NSPrintOperation.run()` is synchronous and blocks the calling
+            // thread until the print job is finished. For WKWebView's print
+            // pipeline that's a deadlock: the operation needs to IPC with
+            // the WebContent process to lay out the content into pages, but
+            // the IPC can't be serviced because the main thread is blocked
+            // inside run(). Confirmed by 38s of heartbeats with no return
+            // on integration-architecture.md (4 Mermaid SVGs, 8 <pre>, ~100KB
+            // body HTML).
+            //
+            // The fix is `runModal(for:delegate:didRun:contextInfo:)`. With
+            // showsPrintPanel = false it doesn't actually show a panel — it
+            // just runs the operation in a modal session that yields to the
+            // runloop, so WebContent IPC can complete. We're notified via
+            // the @objc selector when it finishes.
             let runStart = Date()
             let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
             heartbeat.schedule(deadline: .now() + 1, repeating: 1)
             heartbeat.setEventHandler { @Sendable in
                 let elapsed = Date().timeIntervalSince(runStart)
-                os_log("[pdf] heartbeat: op.run() in flight for %.1fs", log: previewOsLog, type: .info, elapsed)
+                os_log("[pdf] heartbeat: runModal in flight for %.1fs", log: previewOsLog, type: .info, elapsed)
             }
             heartbeat.resume()
 
-            previewLog.notice("[pdf] op.run() entering")
-            os_log("[pdf] op.run() entering (will block main if synchronous)", log: previewOsLog, type: .info)
-            let started = op.run()
-            heartbeat.cancel()
-            let duration = Date().timeIntervalSince(runStart)
-            os_log("[pdf] op.run() returned after %.2fs", log: previewOsLog, type: .info, duration)
-            let exists = FileManager.default.fileExists(atPath: target.path)
-            let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
-            previewLog.notice("[pdf] op.run() returned \(started), duration=\(String(format: "%.2fs", duration), privacy: .public), file exists=\(exists), size=\(size)")
-            self?.onExportFinished?(target, exists && size > 0)
+            // The completion handler needs to outlive this scope — store it
+            // on self so it isn't deallocated before the @objc callback fires.
+            let completion = PrintCompletionHandler(target: target, runStart: runStart, heartbeat: heartbeat) { [weak self] url, ok in
+                self?.onExportFinished?(url, ok)
+            }
+            self?.activePrintCompletion = completion
+
+            guard let window = host.window ?? NSApplication.shared.mainWindow else {
+                previewLog.error("[pdf] no host window for runModal — falling back to run()")
+                let started = op.run()
+                heartbeat.cancel()
+                let exists = FileManager.default.fileExists(atPath: target.path)
+                let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
+                previewLog.notice("[pdf] fallback op.run() returned \(started), file exists=\(exists), size=\(size)")
+                self?.onExportFinished?(target, exists && size > 0)
+                self?.activePrintCompletion = nil
+                return
+            }
+
+            previewLog.notice("[pdf] runModal(for:delegate:didRun:contextInfo:) entering")
+            os_log("[pdf] runModal entering (non-blocking, will service runloop)", log: previewOsLog, type: .info)
+            op.runModal(
+                for: window,
+                delegate: completion,
+                didRun: #selector(PrintCompletionHandler.printOperationDidRun(_:success:contextInfo:)),
+                contextInfo: nil
+            )
         }
+    }
+
+    /// Strong reference to the print-completion callback target so it survives
+    /// the async `runModal` callback path.
+    private var activePrintCompletion: PrintCompletionHandler?
+
+    fileprivate func printDidComplete(_ url: URL, success: Bool, runStart: Date, heartbeat: DispatchSourceTimer) {
+        heartbeat.cancel()
+        let duration = Date().timeIntervalSince(runStart)
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        os_log("[pdf] runModal completed after %.2fs", log: previewOsLog, type: .info, duration)
+        previewLog.notice("[pdf] runModal completed: success=\(success), duration=\(String(format: "%.2fs", duration), privacy: .public), file exists=\(exists), size=\(size)")
+        onExportFinished?(url, exists && size > 0)
+        activePrintCompletion = nil
     }
 }
 
@@ -357,6 +396,35 @@ final class PreviewNavigationHelper: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
         previewLog.error("navigation didFailProvisional: \(error.localizedDescription, privacy: .public)")
         owner?.didFailNavigationCallback(error)
+    }
+}
+
+/// NSObject target used by `NSPrintOperation.runModal(for:delegate:didRun:contextInfo:)`.
+/// AppKit calls back via a fixed @objc selector when the print job finishes;
+/// we forward that into a Swift closure so the calling view controller can
+/// finish in idiomatic Swift.
+final class PrintCompletionHandler: NSObject {
+    private let target: URL
+    private let runStart: Date
+    private let heartbeat: DispatchSourceTimer
+    private let completion: (URL, Bool) -> Void
+
+    init(target: URL, runStart: Date, heartbeat: DispatchSourceTimer, completion: @escaping (URL, Bool) -> Void) {
+        self.target = target
+        self.runStart = runStart
+        self.heartbeat = heartbeat
+        self.completion = completion
+        super.init()
+    }
+
+    @objc func printOperationDidRun(_ printOperation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        heartbeat.cancel()
+        let duration = Date().timeIntervalSince(runStart)
+        os_log("[pdf] printOperationDidRun: success=%d after %.2fs", log: previewOsLog, type: .info, success ? 1 : 0, duration)
+        let exists = FileManager.default.fileExists(atPath: target.path)
+        let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
+        previewLog.notice("[pdf] printOperationDidRun: success=\(success), file exists=\(exists), size=\(size)")
+        completion(target, success && exists && size > 0)
     }
 }
 
