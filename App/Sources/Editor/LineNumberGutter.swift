@@ -35,12 +35,20 @@ final class LineNumberGutter: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(textChanged(_:)),
-            name: NSText.didChangeNotification,
-            object: textView
-        )
+        // Programmatic loads via `textStorage.setAttributedString` (used by
+        // EditorViewController.setSource) don't trigger NSText's
+        // didChangeNotification — that one only fires on user input. To catch
+        // *both* user edits and programmatic loads we observe the underlying
+        // NSTextStorage's didProcessEditing notification, which fires for any
+        // edit.
+        if let storage = textView.textStorage {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(textChanged(_:)),
+                name: NSTextStorage.didProcessEditingNotification,
+                object: storage
+            )
+        }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(boundsChanged(_:)),
@@ -110,6 +118,12 @@ final class LineNumberGutter: NSView {
             .font: font,
             .foregroundColor: NSColor.secondaryLabelColor
         ]
+        // Align the label vertically with the first visual line in the
+        // layout fragment, not the centre of the whole (possibly wrapped)
+        // block. Empirically a 1-2pt inset from the fragment top puts the
+        // number's baseline on the same row as the source text's first
+        // baseline for the typical 13pt monospace editor font.
+        let labelTopInset: CGFloat = 2
 
         var lastNumberedLine: Int = -1
         textLayoutManager.enumerateTextLayoutFragments(
@@ -132,14 +146,12 @@ final class LineNumberGutter: NSView {
             let label = "\(lineNum)"
             let labelSize = (label as NSString).size(withAttributes: attrs)
             // Translate fragment Y (text-container space, flipped) to gutter
-            // local space. We're flipped already, so a fragment at Y=200
-            // inside the text container shows at Y=(200 - visibleRect.minY)
-            // in our gutter.
+            // local space. We're flipped already.
             let containerInset = textView.textContainerOrigin.y
-            let y = (fragmentRect.minY + containerInset) - visibleRect.minY
+            let fragmentTop = (fragmentRect.minY + containerInset) - visibleRect.minY
             let drawRect = NSRect(
                 x: bounds.width - labelSize.width - 8,
-                y: y + (fragmentRect.height - labelSize.height) / 2,
+                y: fragmentTop + labelTopInset,
                 width: labelSize.width,
                 height: labelSize.height
             )
