@@ -50,6 +50,10 @@ final class PreviewViewController: NSViewController {
     }
 
     private var hasIssuedLoad = false
+    /// Document directory used to expand the read-access scope so relative
+    /// image references in the markdown source resolve to neighbouring files.
+    var documentDirectory: URL?
+
     override func viewWillAppear() {
         super.viewWillAppear()
         if !hasIssuedLoad {
@@ -73,8 +77,33 @@ final class PreviewViewController: NSViewController {
             previewLog.error("failed to find preview shell in bundle")
             return
         }
-        let accessURL = Bundle.main.resourceURL ?? indexURL.deletingLastPathComponent()
+        // The widest enclosing directory that contains both the shell and the
+        // document gives WKWebView permission to load images that live next
+        // to the document. Falls back to the bundle's Resources when no doc
+        // URL is known yet.
+        let accessURL = widestAccessScope(forShell: indexURL, documentDir: documentDirectory)
         webView.loadFileURL(indexURL, allowingReadAccessTo: accessURL)
+    }
+
+    private func widestAccessScope(forShell shellURL: URL, documentDir: URL?) -> URL {
+        guard let documentDir else {
+            return Bundle.main.resourceURL ?? shellURL.deletingLastPathComponent()
+        }
+        let bundleResources = Bundle.main.resourceURL ?? shellURL.deletingLastPathComponent()
+        return commonAncestor(bundleResources, documentDir)
+    }
+
+    private func commonAncestor(_ a: URL, _ b: URL) -> URL {
+        let aComponents = a.standardizedFileURL.pathComponents
+        let bComponents = b.standardizedFileURL.pathComponents
+        var common: [String] = []
+        for (x, y) in zip(aComponents, bComponents) {
+            if x == y { common.append(x) } else { break }
+        }
+        if common.isEmpty || common == ["/"] {
+            return URL(fileURLWithPath: "/")
+        }
+        return URL(fileURLWithPath: common.joined(separator: "/"))
     }
 
     func didFinishNavigationCallback() {}

@@ -82,6 +82,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
         editor.delegate = self
         document.bridge.attach(preview: preview, statusBar: statusBar)
+        let docDir = document.fileURL?.deletingLastPathComponent()
+        preview.documentDirectory = docDir
+        document.bridge.documentDirectory = docDir
         window.makeFirstResponder(editor.textView)
         window.setFrameAutosaveName("WritMainWindow")
     }

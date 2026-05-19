@@ -17,12 +17,14 @@ public struct PreviewBridgePayload: Codable, Sendable {
     public let html: String
     public let blocks: [Block]
     public let theme: String
+    public let documentBaseURL: String?
 
-    public init(revision: DocumentRevision, html: String, blocks: [TechnicalBlock], theme: String) {
+    public init(revision: DocumentRevision, html: String, blocks: [TechnicalBlock], theme: String, documentBaseURL: String? = nil) {
         self.revision = revision.value
         self.html = html
         self.blocks = blocks.map { Block(id: $0.id, kind: $0.kind.rawValue, source: $0.source, language: $0.language) }
         self.theme = theme
+        self.documentBaseURL = documentBaseURL
     }
 
     public func encodedAsJSON() throws -> String {

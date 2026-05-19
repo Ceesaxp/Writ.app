@@ -20,6 +20,11 @@ final class PreviewBridge {
     private(set) var currentParsedDocument: ParsedDocument?
     private var pumpTask: Task<Void, Never>?
 
+    /// Directory of the document on disk, used so relative image references
+    /// resolve from the preview's perspective. Updated when the document
+    /// gains or changes its file URL.
+    var documentDirectory: URL?
+
     init(parser: any MarkdownParser) {
         self.scheduler = PreviewScheduler(parser: parser)
     }
@@ -37,7 +42,7 @@ final class PreviewBridge {
     func setTheme(_ theme: String) {
         self.theme = theme
         if let parsed = currentParsedDocument {
-            let payload = PreviewBridgePayload(revision: parsed.revision, html: parsed.html, blocks: parsed.blocks, theme: theme)
+            let payload = PreviewBridgePayload(revision: parsed.revision, html: parsed.html, blocks: parsed.blocks, theme: theme, documentBaseURL: documentDirectory?.absoluteString)
             preview?.apply(payload)
         }
     }
@@ -73,7 +78,7 @@ final class PreviewBridge {
             statusBar?.update(byteCount: nil, lineCount: nil, status: .rendering(revision: revision))
         case .completed(let parsed):
             currentParsedDocument = parsed
-            let payload = PreviewBridgePayload(revision: parsed.revision, html: parsed.html, blocks: parsed.blocks, theme: theme)
+            let payload = PreviewBridgePayload(revision: parsed.revision, html: parsed.html, blocks: parsed.blocks, theme: theme, documentBaseURL: documentDirectory?.absoluteString)
             preview?.apply(payload)
             let total = parsed.parseDuration + parsed.renderDuration
             statusBar?.update(byteCount: nil, lineCount: nil, status: .current(revision: parsed.revision, duration: total))
