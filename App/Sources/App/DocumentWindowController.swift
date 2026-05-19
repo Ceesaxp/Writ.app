@@ -106,7 +106,12 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     func applyLoadedSource() {
         guard let doc = writDocument else { return }
         editor.setSource(doc.sourceText)
-        statusBar.update(byteCount: doc.sourceText.utf8.count, lineCount: doc.sourceText.lineCountWrit, status: .idle)
+        statusBar.update(
+            byteCount: doc.sourceText.utf8.count,
+            lineCount: doc.sourceText.lineCountWrit,
+            wordCount: DocumentSnapshot.wordCount(in: doc.sourceText),
+            status: .idle
+        )
         doc.bridge.scheduleUpdate(source: doc.sourceText)
     }
 
@@ -160,6 +165,18 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         doc.bridge.forceRefresh(source: doc.sourceText)
     }
 
+    @objc func insertCodeBlockMenu(_ sender: Any?) {
+        editor.insertCodeBlock()
+    }
+
+    @objc func insertMathBlockMenu(_ sender: Any?) {
+        editor.insertMathBlock()
+    }
+
+    @objc func insertMermaidBlockMenu(_ sender: Any?) {
+        editor.insertMermaidBlock()
+    }
+
     private func setLayout(_ mode: LayoutMode) {
         layoutMode = mode
         let editorItem = splitController.splitViewItems[0]
@@ -189,11 +206,19 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 extension DocumentWindowController: @MainActor EditorViewControllerDelegate {
     func editor(_ controller: EditorViewController, didChangeText newText: String) {
         writDocument?.applyEditorText(newText)
-        statusBar.update(byteCount: newText.utf8.count, lineCount: newText.lineCountWrit, status: nil)
+        // Word count is linear in document size; skip for very large docs where
+        // it would chase typing. Use a coarse 1 MB threshold matching the
+        // large-document mode.
+        let words = newText.utf8.count < 1_000_000 ? DocumentSnapshot.wordCount(in: newText) : nil
+        statusBar.update(byteCount: newText.utf8.count, lineCount: newText.lineCountWrit, wordCount: words, status: nil)
     }
 
     func editor(_ controller: EditorViewController, didChangeSelectionTo location: (line: Int, column: Int)) {
         statusBar.setSelection(line: location.line, column: location.column)
+    }
+
+    func editor(_ controller: EditorViewController, didScrollToRatio ratio: Double) {
+        preview.scrollToRatio(ratio)
     }
 }
 

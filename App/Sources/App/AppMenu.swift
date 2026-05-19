@@ -76,6 +76,21 @@ enum AppMenu {
         findSubmenu.addItem(replace)
         editMenu.addItem(findMenuItem)
 
+        // Insert menu
+        let insertItem = NSMenuItem()
+        main.addItem(insertItem)
+        let insertMenu = NSMenu(title: "Insert")
+        insertItem.submenu = insertMenu
+        let insertCode = NSMenuItem(title: "Code Block", action: #selector(DocumentWindowController.insertCodeBlockMenu(_:)), keyEquivalent: "k")
+        insertCode.keyEquivalentModifierMask = [.command, .option]
+        insertMenu.addItem(insertCode)
+        let insertMath = NSMenuItem(title: "Math Block", action: #selector(DocumentWindowController.insertMathBlockMenu(_:)), keyEquivalent: "m")
+        insertMath.keyEquivalentModifierMask = [.command, .option]
+        insertMenu.addItem(insertMath)
+        let insertMermaid = NSMenuItem(title: "Mermaid Diagram", action: #selector(DocumentWindowController.insertMermaidBlockMenu(_:)), keyEquivalent: "d")
+        insertMermaid.keyEquivalentModifierMask = [.command, .option]
+        insertMenu.addItem(insertMermaid)
+
         // View menu
         let viewItem = NSMenuItem()
         main.addItem(viewItem)

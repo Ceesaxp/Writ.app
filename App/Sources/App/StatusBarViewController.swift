@@ -10,6 +10,7 @@ final class StatusBarViewController: NSViewController {
 
     private var lastByteCount: Int = 0
     private var lastLineCount: Int? = nil
+    private var lastWordCount: Int = 0
 
     override func loadView() {
         let host = NSView()
@@ -50,20 +51,23 @@ final class StatusBarViewController: NSViewController {
         positionLabel.stringValue = "Ln \(line), Col \(column)"
     }
 
-    func update(byteCount: Int?, lineCount: Int?, status: RenderStatus?) {
+    func update(byteCount: Int?, lineCount: Int?, wordCount: Int? = nil, status: RenderStatus?) {
         if let byteCount {
             lastByteCount = byteCount
         }
         if let lineCount {
             lastLineCount = lineCount
         }
-        countsLabel.stringValue = formatCounts(bytes: lastByteCount, lines: lastLineCount)
+        if let wordCount {
+            lastWordCount = wordCount
+        }
+        countsLabel.stringValue = formatCounts(bytes: lastByteCount, lines: lastLineCount, words: lastWordCount)
         if let status {
             stateLabel.stringValue = formatStatus(status)
         }
     }
 
-    private func formatCounts(bytes: Int, lines: Int?) -> String {
+    private func formatCounts(bytes: Int, lines: Int?, words: Int) -> String {
         let kb = Double(bytes) / 1024.0
         let bytesText: String
         if bytes < 1024 {
@@ -73,10 +77,11 @@ final class StatusBarViewController: NSViewController {
         } else {
             bytesText = String(format: "%.2f MB", kb / 1024.0)
         }
+        let wordsText = words > 0 ? "\(words) words · " : ""
         if let lines {
-            return "\(lines) lines · \(bytesText)"
+            return "\(wordsText)\(lines) lines · \(bytesText)"
         }
-        return bytesText
+        return "\(wordsText)\(bytesText)"
     }
 
     private func formatStatus(_ status: RenderStatus) -> String {

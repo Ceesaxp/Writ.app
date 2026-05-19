@@ -40,6 +40,7 @@ final class MarkdownSyntaxHighlighter {
         listMarker: NSColor(calibratedRed: 0.40, green: 0.30, blue: 0.65, alpha: 1)
     )
 
+    @MainActor
     private static var current: Style {
         NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil ? darkStyle : lightStyle
     }

@@ -29,6 +29,27 @@ struct DocumentSnapshotTests {
         let r = DocumentRevision(5)
         #expect(r.next() > r)
     }
+
+    @Test("Word count returns zero for empty string")
+    func wordsEmpty() {
+        #expect(DocumentSnapshot.wordCount(in: "") == 0)
+    }
+
+    @Test("Word count counts simple words")
+    func wordsSimple() {
+        #expect(DocumentSnapshot.wordCount(in: "hello world") == 2)
+        #expect(DocumentSnapshot.wordCount(in: "  leading and trailing  ") == 3)
+    }
+
+    @Test("Word count handles punctuation as boundaries")
+    func wordsPunct() {
+        #expect(DocumentSnapshot.wordCount(in: "Hello, world! How's it?") == 4)
+    }
+
+    @Test("Word count handles unicode letters")
+    func wordsUnicode() {
+        #expect(DocumentSnapshot.wordCount(in: "café résumé 日本語") == 3)
+    }
 }
 
 @Suite("LargeDocumentMode")

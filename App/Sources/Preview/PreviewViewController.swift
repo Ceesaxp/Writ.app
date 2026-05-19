@@ -128,6 +128,13 @@ final class PreviewViewController: NSViewController {
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
+    func scrollToRatio(_ ratio: Double) {
+        guard isReady else { return }
+        let clamped = max(0, min(1, ratio))
+        let js = "window.Writ && window.Writ.scrollToRatio(\(clamped))"
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
     // MARK: - PDF export
 
     func exportPDF(to url: URL) {
