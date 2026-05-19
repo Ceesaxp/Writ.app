@@ -127,4 +127,18 @@ struct ParserTests {
         #expect(p.html.contains("<thead>"))
         #expect(p.html.contains("<tbody>"))
     }
+
+    @Test("Table column alignment markers reach HTML")
+    func tableAlignment() throws {
+        let src = """
+        | l | c | r |
+        | :--- | :---: | ---: |
+        | 1 | 2 | 3 |
+        """
+        let s = DocumentSnapshot(revision: .zero, source: src)
+        let p = try parser.parse(s)
+        #expect(p.html.contains("text-align:left"))
+        #expect(p.html.contains("text-align:center"))
+        #expect(p.html.contains("text-align:right"))
+    }
 }

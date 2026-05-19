@@ -16,6 +16,10 @@ final class PreviewViewController: NSViewController {
     private(set) var webView: WKWebView!
     private(set) var isReady = false
     private var pendingPayload: PreviewBridgePayload?
+    /// Latest payload we successfully sent into JS. Stashed so it can be
+    /// replayed after a WKWebView reload (Cmd+R or right-click Reload),
+    /// which clears the JS document.
+    private var lastAppliedPayload: PreviewBridgePayload?
     private(set) var lastRenderedRevision: DocumentRevision = .zero
 
     private var navHelper: PreviewNavigationHelper!
@@ -107,14 +111,24 @@ final class PreviewViewController: NSViewController {
     }
 
     func didFinishNavigationCallback() {
-        // Probe-back: if the JS side hasn't announced "ready" within a short
-        // window after navigation finishes, ask it to. Defends against a cold
-        // WebKit launch where the first script-message round-trip is dropped.
+        // After a reload (Cmd+R, right-click → Reload, etc.) the JS document
+        // is reset, so isReady flips back to false and any payload we sent
+        // before is gone. Replay it once the shell is back.
         let probeWebView = webView
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self, !self.isReady else { return }
             previewLog.notice("ready signal missing after 2s — probing")
             probeWebView?.evaluateJavaScript("window.Writ && window.Writ.markReady && window.Writ.markReady()", completionHandler: nil)
+        }
+    }
+
+    /// Called by the navigation helper when a reload is detected. Reverts the
+    /// ready flag so the next `ready` from the freshly-loaded JS triggers a
+    /// replay of the last applied payload.
+    func navigationWillReload() {
+        isReady = false
+        if let last = lastAppliedPayload {
+            pendingPayload = last
         }
     }
 
@@ -151,6 +165,7 @@ final class PreviewViewController: NSViewController {
         do {
             let json = try payload.encodedAsJSON()
             let js = "window.Writ && window.Writ.update(\(json))"
+            lastAppliedPayload = payload
             webView.evaluateJavaScript(js) { [weak self] _, error in
                 if let error {
                     previewLog.error("Writ.update failed: \(error.localizedDescription, privacy: .public)")
@@ -192,17 +207,31 @@ final class PreviewViewController: NSViewController {
 
     // MARK: - PDF export
 
+    /// Save the preview as a paginated PDF.
+    ///
+    /// `WKPDFConfiguration` always produces a single-page PDF the full height
+    /// of the content. For real pagination at standard page sizes we drive
+    /// `WKWebView.printOperation(with:)` instead and tell `NSPrintInfo` to
+    /// save to PDF.
     func exportPDF(to url: URL) {
-        let config = WKPDFConfiguration()
-        webView.createPDF(configuration: config) { result in
-            switch result {
-            case .success(let data):
-                do { try data.write(to: url) }
-                catch { previewLog.error("PDF write failed: \(error.localizedDescription, privacy: .public)") }
-            case .failure(let error):
-                previewLog.error("PDF creation failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
+        let info = NSPrintInfo()
+        info.jobDisposition = .save
+        info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url as NSURL
+        info.paperSize = NSSize(width: 612, height: 792) // US Letter
+        info.topMargin = 36
+        info.bottomMargin = 36
+        info.leftMargin = 36
+        info.rightMargin = 36
+        info.orientation = .portrait
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isHorizontallyCentered = false
+        info.isVerticallyCentered = false
+
+        let op = webView.printOperation(with: info)
+        op.showsPrintPanel = false
+        op.showsProgressPanel = false
+        op.run()
     }
 }
 
@@ -210,6 +239,45 @@ final class PreviewViewController: NSViewController {
 /// the @MainActor view controller conforming to ObjC delegate protocols.
 final class PreviewNavigationHelper: NSObject, WKNavigationDelegate {
     weak var owner: PreviewViewController?
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
+        let action = navigationAction
+        let url = action.request.url
+
+        // Reload (Cmd+R / context menu Reload / programmatic reload): let it
+        // proceed, but tell the owner so it can replay the latest payload
+        // when the fresh JS announces ready.
+        if action.navigationType == .reload {
+            owner?.navigationWillReload()
+            decisionHandler(.allow)
+            return
+        }
+
+        // Initial shell load: always allow.
+        guard let url else { decisionHandler(.allow); return }
+        if action.navigationType == .other && url.isFileURL {
+            decisionHandler(.allow)
+            return
+        }
+
+        // Link clicks: route HTTP(S) / mailto / etc. out to the default
+        // handler so the preview pane never navigates away from the shell.
+        if action.navigationType == .linkActivated {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+
+        // Anything else that isn't a file: URL also goes external — defends
+        // against form submits, redirects, etc.
+        if !url.isFileURL {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+
+        decisionHandler(.allow)
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         owner?.didFinishNavigationCallback()

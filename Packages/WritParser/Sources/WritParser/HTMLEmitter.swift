@@ -117,23 +117,35 @@ struct HTMLEmitter: MarkupWalker {
 
     private mutating func emitTable(_ table: Table) {
         let id = nextBlockID("table")
+        let alignments = table.columnAlignments
         out.append("<table data-writ-id=\"\(id)\">\n<thead><tr>")
-        for cell in table.head.cells {
-            out.append("<th>")
+        for (index, cell) in table.head.cells.enumerated() {
+            let attr = alignAttribute(for: index, in: alignments)
+            out.append("<th\(attr)>")
             emitInlines(cell.children)
             out.append("</th>")
         }
         out.append("</tr></thead>\n<tbody>\n")
         for row in table.body.rows {
             out.append("<tr>")
-            for cell in row.cells {
-                out.append("<td>")
+            for (index, cell) in row.cells.enumerated() {
+                let attr = alignAttribute(for: index, in: alignments)
+                out.append("<td\(attr)>")
                 emitInlines(cell.children)
                 out.append("</td>")
             }
             out.append("</tr>\n")
         }
         out.append("</tbody></table>\n")
+    }
+
+    private func alignAttribute(for column: Int, in alignments: [Table.ColumnAlignment?]) -> String {
+        guard column < alignments.count, let alignment = alignments[column] else { return "" }
+        switch alignment {
+        case .left: return " style=\"text-align:left\""
+        case .center: return " style=\"text-align:center\""
+        case .right: return " style=\"text-align:right\""
+        }
     }
 
     private mutating func emitInlines(_ inlines: MarkupChildren) {
