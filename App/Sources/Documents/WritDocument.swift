@@ -12,8 +12,12 @@ import WritRender
 /// preview view controller on the main thread.
 final class WritDocument: NSDocument {
     /// Canonical source text. UI mutates through `applyEditorText(_:)` to keep
-    /// the change-counted state aligned with edits.
-    private(set) var sourceText: String = ""
+    /// the change-counted state aligned with edits. Marked `nonisolated(unsafe)`
+    /// because NSDocument's `readFromData:ofType:error:` is declared
+    /// `NS_SWIFT_NONISOLATED` and writes to this on the loader thread; AppKit
+    /// serializes load/save with main-thread use, so concurrent mutation is
+    /// impossible by construction.
+    nonisolated(unsafe) private(set) var sourceText: String = ""
 
     private(set) lazy var bridge: PreviewBridge = {
         let parser = WritParserFactory.make()
@@ -41,21 +45,28 @@ final class WritDocument: NSDocument {
         try read(from: data, ofType: typeName)
     }
 
+    nonisolated(unsafe) private var loadedEncoding: String.Encoding = .utf8
+    nonisolated(unsafe) private var hadBOM = false
+
     override func read(from data: Data, ofType typeName: String) throws {
-        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadCorruptFileError, userInfo: [
-                NSLocalizedFailureReasonErrorKey: "File is not valid UTF-8 or Latin-1."
-            ])
-        }
-        sourceText = text
+        let decoded = TextDecoder.decode(data)
+        sourceText = decoded.text
+        loadedEncoding = decoded.encoding
+        hadBOM = decoded.hadBOM
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.windowControllers.compactMap { $0 as? DocumentWindowController }.forEach { $0.applyLoadedSource() }
+            self.windowControllers
+                .compactMap { $0 as? DocumentWindowController }
+                .forEach { $0.applyLoadedSource() }
         }
     }
 
     override func data(ofType typeName: String) throws -> Data {
-        Data(sourceText.utf8)
+        // Always write UTF-8. Preserve a BOM if the input file had one — some
+        // Windows-side editors expect it. Files that originally arrived as
+        // CP1252 / Latin-1 are upgraded to UTF-8 on save so the canonical
+        // format is consistent going forward.
+        TextDecoder.encode(sourceText, encoding: .utf8, addBOM: hadBOM)
     }
 
     override func fileNameExtension(forType typeName: String, saveOperation: NSDocument.SaveOperationType) -> String? {

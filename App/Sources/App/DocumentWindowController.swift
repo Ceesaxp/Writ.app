@@ -90,9 +90,12 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
     deinit {
-        // Bridge is main-actor isolated; clean up via a fire-and-forget Task.
-        let bridge = writDocument?.bridge
-        Task { @MainActor in bridge?.cancelAll() }
+        // PreviewBridge.cancelAll is main-actor isolated. deinit runs on
+        // whichever thread releases the last reference; hop to main to clean
+        // up. Capture the document weakly so we don't extend its lifetime
+        // beyond what AppKit already keeps.
+        let doc = writDocument
+        Task { @MainActor in doc?.bridge.cancelAll() }
     }
 
     override func windowDidLoad() {

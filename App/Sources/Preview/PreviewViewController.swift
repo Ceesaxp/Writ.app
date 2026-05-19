@@ -59,7 +59,12 @@ final class PreviewViewController: NSViewController {
     }
 
     deinit {
-        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "writ")
+        // WKWebView config is main-actor isolated; cleanup hops to main.
+        if let webView {
+            Task { @MainActor in
+                webView.configuration.userContentController.removeScriptMessageHandler(forName: "writ")
+            }
+        }
     }
 
     private func loadShell() {

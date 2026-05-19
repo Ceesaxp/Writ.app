@@ -2,6 +2,7 @@ import Cocoa
 
 /// Programmatically built main menu — avoids storyboard/XIB resources so the
 /// app can boot without Interface Builder artifacts.
+@MainActor
 enum AppMenu {
     static func install() {
         let main = NSMenu()
