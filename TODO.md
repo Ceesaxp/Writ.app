@@ -67,9 +67,7 @@ Remaining:
 
 Done:
 - [x] **External file change detection** — `WritDocument.presentedItemDidChange` shows an NSAlert sheet, with the unsaved-edits path warning the user before clobbering local changes; clean docs get a simpler Reload/Ignore prompt; `revert(toContentsOf:)` + `applyLoadedSource` keeps editor and preview in lock-step.
-
-In progress / known issues:
-- [/] **Optional line numbers** — `LineNumberRulerView` (`NSRulerView` walking `NSTextLayoutManager.enumerateTextLayoutFragments`) is in place and toggle-able from View > Show Line Numbers (⌥⌘L). Ruler attaches at correct thickness (42pt) but is not visually rendered — suspected NSRulerView / TextKit 2 interop issue. Default off. Replacement plan: custom NSView placed in a container alongside the scroll view, not via NSRulerView.
+- [x] **Optional line numbers** — custom `LineNumberGutter` NSView (not `NSRulerView` — that didn't render visibly with TextKit 2) walks `NSTextLayoutManager.enumerateTextLayoutFragments` to paint right-aligned 1-indexed source-line numbers in a 44pt gutter alongside the scroll view. Default ON; toggle via View > Show Line Numbers (⌥⌘L); persists in UserDefaults.
 
 Remaining:
 - [ ] Incremental / range-aware editor syntax highlighting (currently regex-pass with 80 ms debounce, 500 KB cap)
