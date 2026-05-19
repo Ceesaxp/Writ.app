@@ -10,7 +10,7 @@ private extension Comparable {
 protocol EditorViewControllerDelegate: AnyObject {
     func editor(_ controller: EditorViewController, didChangeText newText: String)
     func editor(_ controller: EditorViewController, didChangeSelectionTo location: (line: Int, column: Int))
-    func editor(_ controller: EditorViewController, didScrollToRatio ratio: Double)
+    func editor(_ controller: EditorViewController, didScrollToRatio ratio: Double, topSourceLine: Int)
 }
 
 /// AppKit/TextKit-backed editor surface.
@@ -133,10 +133,34 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         let visibleHeight = contentView.bounds.height
         let scrollable = max(1, docHeight - visibleHeight)
         let ratio = Double(contentView.bounds.origin.y / scrollable).clamped(to: 0...1)
-        // Filter sub-percent jitter to avoid spamming the bridge.
         if abs(ratio - lastScrollRatio) < 0.005 { return }
         lastScrollRatio = ratio
-        delegate?.editor(self, didScrollToRatio: ratio)
+        delegate?.editor(self, didScrollToRatio: ratio, topSourceLine: topVisibleSourceLine())
+    }
+
+    /// Computes the 1-indexed source line at the top of the editor's
+    /// visible area. Used for block-aware preview scroll sync — the bridge
+    /// passes this to the preview so it can align the matching block.
+    private func topVisibleSourceLine() -> Int {
+        guard let textLayoutManager = textView.textLayoutManager else { return 1 }
+        let visibleY = scrollView.contentView.bounds.origin.y + textView.textContainerOrigin.y
+        var topLine = 1
+        textLayoutManager.enumerateTextLayoutFragments(
+            from: textLayoutManager.textViewportLayoutController.viewportRange?.location,
+            options: [.ensuresLayout]
+        ) { fragment in
+            let frame = fragment.layoutFragmentFrame
+            if frame.maxY < visibleY { return true }
+            // First fragment at or below the visible top.
+            let location = fragment.rangeInElement.location
+            let offset = textLayoutManager.offset(
+                from: textLayoutManager.documentRange.location,
+                to: location
+            )
+            topLine = DocumentSnapshot.lineColumn(in: currentSource, utf16Offset: offset).line
+            return false
+        }
+        return topLine
     }
 
     private func makeTextView() -> NSTextView {

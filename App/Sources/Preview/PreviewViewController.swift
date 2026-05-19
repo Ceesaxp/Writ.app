@@ -184,6 +184,17 @@ final class PreviewViewController: NSViewController {
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
+    /// Block-aware scroll sync: ask the preview to align the rendered block
+    /// that maps to the editor's top visible source line. If the block can't
+    /// be located (e.g. the line is inside a fenced block we don't surface),
+    /// the JS side falls back to proportional scroll using `fallbackRatio`.
+    func scrollToSourceLine(_ line: Int, fallbackRatio: Double) {
+        guard isReady else { return }
+        let clampedRatio = max(0, min(1, fallbackRatio))
+        let js = "window.Writ && window.Writ.scrollToSourceLine(\(line), \(clampedRatio))"
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
     /// Asks the preview JS to return the current `#writ-content` innerHTML.
     /// Used by the HTML export pipeline so rendered math/mermaid output is
     /// captured in the export rather than the unrendered placeholders.

@@ -232,8 +232,8 @@ extension DocumentWindowController: @MainActor EditorViewControllerDelegate {
         statusBar.setSelection(line: location.line, column: location.column)
     }
 
-    func editor(_ controller: EditorViewController, didScrollToRatio ratio: Double) {
-        preview.scrollToRatio(ratio)
+    func editor(_ controller: EditorViewController, didScrollToRatio ratio: Double, topSourceLine: Int) {
+        preview.scrollToSourceLine(topSourceLine, fallbackRatio: ratio)
     }
 }
 

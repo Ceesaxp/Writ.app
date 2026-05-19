@@ -36,15 +36,16 @@ struct HTMLEmitter: MarkupWalker {
     }
 
     private mutating func visitChild(_ markup: any Markup) {
+        let lineAttr = sourceLineAttribute(for: markup)
         switch markup {
         case let h as Heading:
             let id = nextBlockID("h")
-            out.append("<h\(h.level) data-writ-id=\"\(id)\">")
+            out.append("<h\(h.level) data-writ-id=\"\(id)\"\(lineAttr)>")
             emitInlines(h.children)
             out.append("</h\(h.level)>\n")
         case let p as Paragraph:
             let id = nextBlockID("p")
-            out.append("<p data-writ-id=\"\(id)\">")
+            out.append("<p data-writ-id=\"\(id)\"\(lineAttr)>")
             emitInlines(p.children)
             out.append("</p>\n")
         case let code as CodeBlock:
@@ -53,55 +54,62 @@ struct HTMLEmitter: MarkupWalker {
             if language == "mermaid" {
                 let blockID = "MERMAID_\(blockCounter - 1)"
                 collectedBlocks.append(TechnicalBlock(id: blockID, kind: .mermaid, source: code.code))
-                out.append("<div data-writ-id=\"\(id)\" data-writ-block=\"\(blockID)\" class=\"writ-mermaid\"></div>\n")
+                out.append("<div data-writ-id=\"\(id)\"\(lineAttr) data-writ-block=\"\(blockID)\" class=\"writ-mermaid\"></div>\n")
             } else if language == "plantuml" {
                 let blockID = "PLANTUML_\(blockCounter - 1)"
                 collectedBlocks.append(TechnicalBlock(id: blockID, kind: .plantuml, source: code.code))
-                out.append("<div data-writ-id=\"\(id)\" data-writ-block=\"\(blockID)\" class=\"writ-plantuml\">")
+                out.append("<div data-writ-id=\"\(id)\"\(lineAttr) data-writ-block=\"\(blockID)\" class=\"writ-plantuml\">")
                 out.append("<div class=\"writ-plantuml-notice\">PlantUML rendering is not configured</div>")
                 out.append("<pre><code>\(escape(code.code))</code></pre>")
                 out.append("</div>\n")
             } else if language == "math" {
                 let blockID = "MATH_FENCED_\(blockCounter - 1)"
                 collectedBlocks.append(TechnicalBlock(id: blockID, kind: .math, source: code.code))
-                out.append("<div data-writ-id=\"\(id)\" data-writ-block=\"\(blockID)\" class=\"writ-math-block\"></div>\n")
+                out.append("<div data-writ-id=\"\(id)\"\(lineAttr) data-writ-block=\"\(blockID)\" class=\"writ-math-block\"></div>\n")
             } else {
                 let langClass = language.isEmpty ? "" : " class=\"language-\(escape(language))\""
-                out.append("<pre data-writ-id=\"\(id)\"><code\(langClass)>\(escape(code.code))</code></pre>\n")
+                out.append("<pre data-writ-id=\"\(id)\"\(lineAttr)><code\(langClass)>\(escape(code.code))</code></pre>\n")
             }
         case let html as HTMLBlock:
             let id = nextBlockID("html")
-            out.append("<div data-writ-id=\"\(id)\">\(html.rawHTML)</div>\n")
+            out.append("<div data-writ-id=\"\(id)\"\(lineAttr)>\(html.rawHTML)</div>\n")
         case let list as UnorderedList:
             let id = nextBlockID("ul")
-            out.append("<ul data-writ-id=\"\(id)\">\n")
+            out.append("<ul data-writ-id=\"\(id)\"\(lineAttr)>\n")
             for item in list.listItems { emitListItem(item) }
             out.append("</ul>\n")
         case let list as OrderedList:
             let id = nextBlockID("ol")
             let startAttr = list.startIndex == 1 ? "" : " start=\"\(list.startIndex)\""
-            out.append("<ol data-writ-id=\"\(id)\"\(startAttr)>\n")
+            out.append("<ol data-writ-id=\"\(id)\"\(lineAttr)\(startAttr)>\n")
             for item in list.listItems { emitListItem(item) }
             out.append("</ol>\n")
         case let quote as BlockQuote:
             let id = nextBlockID("bq")
-            out.append("<blockquote data-writ-id=\"\(id)\">\n")
+            out.append("<blockquote data-writ-id=\"\(id)\"\(lineAttr)>\n")
             for child in quote.children { visitChild(child) }
             out.append("</blockquote>\n")
         case is ThematicBreak:
             let id = nextBlockID("hr")
-            out.append("<hr data-writ-id=\"\(id)\">\n")
-        case let table as Table:
-            emitTable(table)
+            out.append("<hr data-writ-id=\"\(id)\"\(lineAttr)>\n")
+        case is Table:
+            emitTable(markup as! Table, lineAttr: lineAttr)
         default:
             // Fallback: render via swift-markdown's debug-format then text only.
             let id = nextBlockID("block")
-            out.append("<div data-writ-id=\"\(id)\">")
+            out.append("<div data-writ-id=\"\(id)\"\(lineAttr)>")
             for child in markup.children {
                 visitChild(child)
             }
             out.append("</div>\n")
         }
+    }
+
+    private func sourceLineAttribute(for markup: any Markup) -> String {
+        if let line = markup.range?.lowerBound.line {
+            return " data-writ-line=\"\(line)\""
+        }
+        return ""
     }
 
     private mutating func emitListItem(_ item: ListItem) {
@@ -115,10 +123,10 @@ struct HTMLEmitter: MarkupWalker {
         out.append("</li>\n")
     }
 
-    private mutating func emitTable(_ table: Table) {
+    private mutating func emitTable(_ table: Table, lineAttr: String = "") {
         let id = nextBlockID("table")
         let alignments = table.columnAlignments
-        out.append("<table data-writ-id=\"\(id)\">\n<thead><tr>")
+        out.append("<table data-writ-id=\"\(id)\"\(lineAttr)>\n<thead><tr>")
         for (index, cell) in table.head.cells.enumerated() {
             let attr = alignAttribute(for: index, in: alignments)
             out.append("<th\(attr)>")
