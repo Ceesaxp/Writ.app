@@ -1,10 +1,18 @@
 import Cocoa
 import WebKit
 import os
+import os.log
 import WritCore
 import WritRender
 
 private let previewLog = Logger(subsystem: "org.ceesaxp.Writ", category: "preview")
+
+/// Old-school C-API log handle. We use this from background-thread closures
+/// (the PDF export heartbeat, for instance) because the newer Swift `Logger`
+/// becomes MainActor-isolated by inference when captured in a closure that
+/// originated on the main actor, which crashes under Swift 6 strict
+/// concurrency when the timer fires off-main.
+private let previewOsLog = OSLog(subsystem: "org.ceesaxp.Writ", category: "preview")
 
 /// Hosts a persistent `WKWebView` for the preview lifetime of one document.
 ///
@@ -265,22 +273,28 @@ final class PreviewViewController: NSViewController {
             op.showsProgressPanel = false
             previewLog.notice("[pdf] op built, showsPrintPanel=\(op.showsPrintPanel) showsProgressPanel=\(op.showsProgressPanel)")
 
-            // Drop a heartbeat onto a background queue so we can tell from
-            // the logs whether the main thread is actually blocked inside
-            // op.run() versus the operation having returned silently.
+            // Set up a heartbeat that pings every second while `op.run()` is
+            // executing. We MUST avoid touching the Swift `Logger` from a
+            // background thread inside this closure — under Swift 6 strict
+            // concurrency the closure inherits MainActor isolation from the
+            // enclosing function and asserts when fired off-main (crash
+            // report Writ-2026-05-19-201711.ips). The lower-level `os_log`
+            // is a C function and works fine from any thread.
             let runStart = Date()
-            let stillRunning = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-            stillRunning.schedule(deadline: .now() + 1, repeating: 1)
-            stillRunning.setEventHandler {
+            let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            heartbeat.schedule(deadline: .now() + 1, repeating: 1)
+            heartbeat.setEventHandler { @Sendable in
                 let elapsed = Date().timeIntervalSince(runStart)
-                previewLog.notice("[pdf] heartbeat: op.run() in flight for \(String(format: "%.1fs", elapsed), privacy: .public)")
+                os_log("[pdf] heartbeat: op.run() in flight for %.1fs", log: previewOsLog, type: .info, elapsed)
             }
-            stillRunning.resume()
+            heartbeat.resume()
 
             previewLog.notice("[pdf] op.run() entering")
+            os_log("[pdf] op.run() entering (will block main if synchronous)", log: previewOsLog, type: .info)
             let started = op.run()
-            stillRunning.cancel()
+            heartbeat.cancel()
             let duration = Date().timeIntervalSince(runStart)
+            os_log("[pdf] op.run() returned after %.2fs", log: previewOsLog, type: .info, duration)
             let exists = FileManager.default.fileExists(atPath: target.path)
             let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
             previewLog.notice("[pdf] op.run() returned \(started), duration=\(String(format: "%.2fs", duration), privacy: .public), file exists=\(exists), size=\(size)")
