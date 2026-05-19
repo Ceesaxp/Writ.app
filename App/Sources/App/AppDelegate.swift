@@ -31,6 +31,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    private var folderWindowControllers: [FolderWindowController] = []
+
+    @MainActor @objc func openFolder(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder to browse for Markdown files."
+        panel.prompt = "Open"
+        let response = panel.runModal()
+        guard response == .OK, let url = panel.url else { return }
+        let controller = FolderWindowController(folder: url)
+        folderWindowControllers.append(controller)
+        controller.showWindow(nil)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
