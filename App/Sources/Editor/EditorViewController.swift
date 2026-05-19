@@ -28,7 +28,10 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     private(set) var textView: NSTextView!
     private var scrollView: NSScrollView!
-    private var lineNumberRuler: LineNumberRulerView?
+    private var containerView: NSView!
+    private var gutter: LineNumberGutter?
+    private var gutterWidthConstraint: NSLayoutConstraint?
+    private var scrollLeadingConstraint: NSLayoutConstraint?
     private var currentSource: String = ""
     private var suppressDelegateBroadcast = false
     private let syntaxHighlighter = MarkdownSyntaxHighlighter()
@@ -40,7 +43,13 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     /// TODO.md as a known M3 limitation.
     static let lineNumbersDefaultsKey = "WritShowLineNumbers"
     static var lineNumbersEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: lineNumbersDefaultsKey) }
+        get {
+            // Default ON: first launch shows line numbers. Users can toggle
+            // off via View > Show Line Numbers (⌥⌘L) and the preference
+            // persists.
+            if UserDefaults.standard.object(forKey: lineNumbersDefaultsKey) == nil { return true }
+            return UserDefaults.standard.bool(forKey: lineNumbersDefaultsKey)
+        }
         set { UserDefaults.standard.set(newValue, forKey: lineNumbersDefaultsKey) }
     }
 
@@ -81,13 +90,29 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         scroll.documentView = textView
         self.scrollView = scroll
         self.textView = textView
-        self.view = scroll
 
-        // Defer ruler attachment to viewWillAppear — at this point the views
-        // have zero frame and scrollView.tile() is a no-op.
+        // Wrap the scroll view in a container so a custom line-number gutter
+        // can sit alongside it (we don't use NSRulerView — see
+        // LineNumberGutter for the reason).
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(scroll)
+        let leading = scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: container.topAnchor),
+            leading,
+            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        self.scrollLeadingConstraint = leading
+        self.containerView = container
+        self.view = container
 
         // Observe scroll position so the bridge can propagate to the preview.
         scroll.contentView.postsBoundsChangedNotifications = true
+        scroll.contentView.postsFrameChangedNotifications = true
+        textView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(scrollViewDidScroll(_:)),
@@ -129,21 +154,37 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     private func applyLineNumberPreference() {
         let enabled = EditorViewController.lineNumbersEnabled
         if enabled {
-            if lineNumberRuler == nil {
-                let ruler = LineNumberRulerView(scrollView: scrollView, textView: textView)
-                lineNumberRuler = ruler
-                scrollView.hasVerticalRuler = true
-                scrollView.verticalRulerView = ruler
+            if gutter == nil {
+                let newGutter = LineNumberGutter(textView: textView, clipView: scrollView.contentView)
+                containerView.addSubview(newGutter)
+                let width = newGutter.widthAnchor.constraint(equalToConstant: LineNumberGutter.defaultWidth)
+                NSLayoutConstraint.activate([
+                    newGutter.topAnchor.constraint(equalTo: containerView.topAnchor),
+                    newGutter.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+                    newGutter.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+                    width
+                ])
+                gutterWidthConstraint = width
+                scrollLeadingConstraint?.isActive = false
+                let newLeading = scrollView.leadingAnchor.constraint(equalTo: newGutter.trailingAnchor)
+                newLeading.isActive = true
+                scrollLeadingConstraint = newLeading
+                gutter = newGutter
             }
-            scrollView.rulersVisible = true
+            gutter?.isHidden = false
+            gutter?.needsDisplay = true
         } else {
-            scrollView.rulersVisible = false
-            scrollView.hasVerticalRuler = false
-            scrollView.verticalRulerView = nil
-            lineNumberRuler = nil
+            gutter?.removeFromSuperview()
+            gutter = nil
+            gutterWidthConstraint = nil
+            // Restore scroll-view-flush-left.
+            scrollLeadingConstraint?.isActive = false
+            let flushLeading = scrollView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor)
+            flushLeading.isActive = true
+            scrollLeadingConstraint = flushLeading
         }
-        scrollView.tile()
-        scrollView.needsDisplay = true
+        containerView.needsLayout = true
+        containerView.layoutSubtreeIfNeeded()
     }
 
     func toggleLineNumbers() {
