@@ -217,14 +217,37 @@ final class PreviewViewController: NSViewController {
 
     func exportPDF(to url: URL) {
         let host = webView
+        let target = url
+        previewLog.notice("[pdf] entry: target=\(target.path, privacy: .public)")
+
+        // Probe how loaded the WebKit content is before we begin so we can
+        // tell "PDF export is slow because there's a lot of mermaid" from
+        // "PDF export is hung in the print operation".
+        host?.evaluateJavaScript("""
+            (function() {
+              var imgs = document.querySelectorAll('img').length;
+              var pre = document.querySelectorAll('pre').length;
+              var mermaid = document.querySelectorAll('.writ-mermaid').length;
+              var mermaidSvgs = document.querySelectorAll('.writ-mermaid svg').length;
+              var math = document.querySelectorAll('.writ-math-block,.writ-math-inline').length;
+              var bodyLen = (document.body.innerHTML || '').length;
+              return JSON.stringify({imgs, pre, mermaid, mermaidSvgs, math, bodyLen});
+            })()
+        """) { value, _ in
+            previewLog.notice("[pdf] dom snapshot: \(String(describing: value), privacy: .public)")
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            previewLog.notice("[pdf] settle delay elapsed, building NSPrintInfo")
             guard let host else {
-                self?.onExportFinished?(url, false)
+                previewLog.error("[pdf] aborting: webview gone")
+                self?.onExportFinished?(target, false)
                 return
             }
+
             let info = NSPrintInfo()
             info.jobDisposition = .save
-            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url as NSURL
+            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = target as NSURL
             info.paperSize = NSSize(width: 612, height: 792) // US Letter
             info.topMargin = 36
             info.bottomMargin = 36
@@ -236,13 +259,32 @@ final class PreviewViewController: NSViewController {
             info.isHorizontallyCentered = false
             info.isVerticallyCentered = false
 
+            previewLog.notice("[pdf] printOperation(with:) building")
             let op = host.printOperation(with: info)
             op.showsPrintPanel = false
             op.showsProgressPanel = false
+            previewLog.notice("[pdf] op built, showsPrintPanel=\(op.showsPrintPanel) showsProgressPanel=\(op.showsProgressPanel)")
+
+            // Drop a heartbeat onto a background queue so we can tell from
+            // the logs whether the main thread is actually blocked inside
+            // op.run() versus the operation having returned silently.
+            let runStart = Date()
+            let stillRunning = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            stillRunning.schedule(deadline: .now() + 1, repeating: 1)
+            stillRunning.setEventHandler {
+                let elapsed = Date().timeIntervalSince(runStart)
+                previewLog.notice("[pdf] heartbeat: op.run() in flight for \(String(format: "%.1fs", elapsed), privacy: .public)")
+            }
+            stillRunning.resume()
+
+            previewLog.notice("[pdf] op.run() entering")
             let started = op.run()
-            let exists = FileManager.default.fileExists(atPath: url.path)
-            previewLog.notice("PDF export run() returned \(started), file exists: \(exists)")
-            self?.onExportFinished?(url, exists)
+            stillRunning.cancel()
+            let duration = Date().timeIntervalSince(runStart)
+            let exists = FileManager.default.fileExists(atPath: target.path)
+            let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
+            previewLog.notice("[pdf] op.run() returned \(started), duration=\(String(format: "%.2fs", duration), privacy: .public), file exists=\(exists), size=\(size)")
+            self?.onExportFinished?(target, exists && size > 0)
         }
     }
 }
