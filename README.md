@@ -8,35 +8,55 @@ Writ follows a WYWIWYM principle: *What You Write Is What You Mean*. It is not a
 
 ## Status
 
-Writ is under active MVP development.
+M0 → M3 of the MVP plan are feature-complete. Pre-1.0 release builds are
+signed with my Developer ID; see [the mini-site](https://ceesaxp.github.io/writ/)
+for the latest DMG.
 
-Implemented or largely implemented:
+Implemented:
 
-- Document-based macOS app for `.md`, `.markdown`, and `.txt`
-- AppKit/TextKit editor surface, not SwiftUI `TextEditor`
-- Native editing behaviors such as undo, redo, find/replace, tabs, autosave, spellcheck, selection, drag, copy, and paste
-- Source-only, preview-only, and split source/preview modes
-- Persistent `WKWebView` preview with debounced updates
-- GitHub-Flavored Markdown rendering
-- Syntax-highlighted code blocks in preview
-- Dark/light aware preview styling
-- Math support through KaTeX, with MathJax bundled as a runtime alternate
-- Mermaid fenced block rendering
-- PlantUML fenced block recognition with a non-blocking local-rendering notice
-- Status bar with word count, line/column, and render status
-- Basic HTML and PDF export paths
-- Swift package tests for core, parser, and render modules
+- Document-based macOS app for `.md`, `.markdown`, and `.txt`, with
+  BOM-aware UTF-8 + CP1252 / Latin-1 fallback on read
+- AppKit / TextKit 2 editor surface, AST-driven incremental syntax
+  highlighting via `swift-markdown`
+- Optional line numbers (`⌥⌘L`) rendered by a custom NSView gutter
+- Fenced-code lines get a full-width background tint behind the glyphs
+- Auto-pair brackets / quotes / fence markers
+- Insert menu: code (`⌥⌘K`), math (`⌥⌘M`), Mermaid (`⌥⌘D`)
+- Source-only, preview-only, and split modes (`⌥⌘1/2/3`)
+- Persistent `WKWebView` preview with debounced updates and stale-result
+  rejection; block-aware two-way scroll sync between editor and preview
+- GitHub-Flavored Markdown rendering with table alignment markers
+- Math through KaTeX by default; MathJax bundled as a runtime alternate
+- Mermaid fenced block rendering, offline
+- Local image / SVG references via a sandbox-friendly `writ-doc://` URL
+  scheme handler
+- Preview HTML sanitiser strips `<script>`, event handlers, and
+  `javascript:` URLs from raw inline HTML in source
+- Render diagnostics ribbon in the preview pane with click-to-jump
+- Status bar with word count, line/column, render status
+- HTML export captures the live preview DOM (math / Mermaid survive);
+  PDF export via `WKWebView.printOperation` produces a paginated US
+  Letter PDF
+- External file-change detection with unsaved-edits warning
+- File > Open Folder… (`⇧⌘O`) opens a sidebar window listing markdown
+  files in a directory; filter-as-quick-open
+- Outline / heading navigation pane (`⌥⌘0`)
+- Preferences pane (`⌘,`): large-doc thresholds, debounce intervals,
+  line numbers toggle
+- PlantUML fenced block recognition with a non-blocking
+  "renderer not configured" notice
+- Swift Testing suites for core, parser, and render packages (59 tests);
+  GitHub Actions CI builds the app and runs the suites on macOS 15
 
-Still in progress:
+Deferred to post-MVP:
 
-- Sandboxed local image and SVG preview support
-- Preview HTML sanitization pass
-- Export that preserves live-rendered math and Mermaid output
-- Stronger scroll sync
-- Incremental/range-aware editor highlighting for large files
-- Optional line numbers
-- Folder/project mode
 - Optional local PlantUML rendering
+- Sanitized inline SVG injection
+- DOM patching preview updates (only if measurement shows full reload
+  is inadequate on common workloads)
+- Theme system
+- Deeper folder/workspace features (graph view, backlinks, project
+  metadata)
 
 See [TODO.md](TODO.md) and [docs/01-MVP-PLAN.md](docs/01-MVP-PLAN.md) for milestone tracking.
 

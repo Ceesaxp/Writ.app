@@ -248,7 +248,15 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     @objc func toggleOutline(_ sender: Any?) {
-        outlineSplitItem.animator().isCollapsed.toggle()
+        // Direct mutation rather than going through .animator() — the
+        // sidebar-style split item ignores the animation proxy in some
+        // macOS releases and the toggle silently no-ops.
+        outlineSplitItem.isCollapsed.toggle()
+        // Refresh the outline whenever it becomes visible so the user
+        // doesn't see stale data after editing while it was collapsed.
+        if !outlineSplitItem.isCollapsed, let doc = writDocument {
+            outline.update(with: doc.sourceText)
+        }
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
@@ -256,13 +264,20 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             item.state = EditorViewController.lineNumbersEnabled ? .on : .off
             return true
         }
+        if item.action == #selector(toggleOutline(_:)) {
+            item.title = outlineSplitItem.isCollapsed ? "Show Outline" : "Hide Outline"
+            return true
+        }
         return true
     }
 
     private func setLayout(_ mode: LayoutMode) {
         layoutMode = mode
-        let editorItem = splitController.splitViewItems[0]
-        let previewItem = splitController.splitViewItems[1]
+        // Indices after the outline sidebar was prepended: 0 = outline,
+        // 1 = editor, 2 = preview. The Source/Split/Preview switcher only
+        // touches editor and preview; the outline visibility is independent.
+        let editorItem = splitController.splitViewItems[1]
+        let previewItem = splitController.splitViewItems[2]
         switch mode {
         case .source:
             editorItem.isCollapsed = false
