@@ -33,6 +33,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var folderWindowControllers: [FolderWindowController] = []
 
+    private var preferencesController: PreferencesWindowController?
+
+    @MainActor @objc func showPreferences(_ sender: Any?) {
+        if preferencesController == nil {
+            preferencesController = PreferencesWindowController()
+        }
+        preferencesController?.showWindow(nil)
+        preferencesController?.window?.makeKeyAndOrderFront(nil)
+    }
+
     @MainActor @objc func openFolder(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true

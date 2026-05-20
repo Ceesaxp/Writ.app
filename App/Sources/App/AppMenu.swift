@@ -14,6 +14,8 @@ enum AppMenu {
         appItem.submenu = appMenu
         appMenu.addItem(NSMenuItem(title: "About Writ", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(AppDelegate.showPreferences(_:)), keyEquivalent: ","))
+        appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Hide Writ", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
         let hideOthers = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]

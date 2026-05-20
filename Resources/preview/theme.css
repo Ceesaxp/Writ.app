@@ -157,6 +157,39 @@ img { max-width: 100%; height: auto; }
   background: transparent;
 }
 
+/* Render diagnostics ribbon — sits at the top of the preview pane when
+   any block render failed. Click to scroll to the first error. */
+.writ-diagnostics-ribbon {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--writ-warning-bg);
+  color: var(--writ-warning-fg);
+  border-bottom: 1px solid var(--writ-warning-fg);
+  padding: 0.45em 0.9em;
+  font-size: 0.85em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+.writ-diagnostics-ribbon::before {
+  content: "⚠";
+  font-size: 1.1em;
+}
+
+/* Missing-image placeholder */
+.writ-missing-image {
+  display: inline-block;
+  background: var(--writ-warning-bg);
+  color: var(--writ-warning-fg);
+  border: 1px dashed var(--writ-warning-fg);
+  border-radius: 4px;
+  padding: 0.15em 0.5em;
+  font-family: var(--writ-mono-font);
+  font-size: 0.85em;
+}
+
 /* Loading shimmer for pending technical blocks */
 .writ-pending {
   display: inline-block;

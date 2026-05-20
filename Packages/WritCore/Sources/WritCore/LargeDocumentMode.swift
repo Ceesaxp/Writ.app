@@ -25,6 +25,37 @@ public struct LargeDocumentMode: Sendable {
         }
 
         public static let `default` = Thresholds()
+
+        // MARK: - UserDefaults persistence (M3 Preferences pane)
+
+        public static let byteThresholdDefaultsKey = "WritLargeDocByteThreshold"
+        public static let lineThresholdDefaultsKey = "WritLargeDocLineThreshold"
+        public static let debounceNormalDefaultsKey = "WritDebounceNormalMs"
+        public static let debounceLargeDefaultsKey = "WritDebounceLargeMs"
+
+        public static func fromDefaults(_ defaults: UserDefaults = .standard) -> Thresholds {
+            let base = Thresholds.default
+            let bytes = defaults.object(forKey: byteThresholdDefaultsKey) as? Int ?? base.byteThreshold
+            let lines = defaults.object(forKey: lineThresholdDefaultsKey) as? Int ?? base.lineThreshold
+            let normalMs = defaults.object(forKey: debounceNormalDefaultsKey) as? Int
+            let largeMs = defaults.object(forKey: debounceLargeDefaultsKey) as? Int
+            return Thresholds(
+                byteThreshold: bytes,
+                lineThreshold: lines,
+                debounceNormal: normalMs.map { .milliseconds($0) } ?? base.debounceNormal,
+                debounceLarge: largeMs.map { .milliseconds($0) } ?? base.debounceLarge
+            )
+        }
+
+        public func persist(_ defaults: UserDefaults = .standard) {
+            defaults.set(byteThreshold, forKey: Thresholds.byteThresholdDefaultsKey)
+            defaults.set(lineThreshold, forKey: Thresholds.lineThresholdDefaultsKey)
+            // Store debounces as Int milliseconds for human inspection.
+            let normalMs = debounceNormal.components.seconds * 1000 + debounceNormal.components.attoseconds / 1_000_000_000_000_000
+            let largeMs = debounceLarge.components.seconds * 1000 + debounceLarge.components.attoseconds / 1_000_000_000_000_000
+            defaults.set(Int(normalMs), forKey: Thresholds.debounceNormalDefaultsKey)
+            defaults.set(Int(largeMs), forKey: Thresholds.debounceLargeDefaultsKey)
+        }
     }
 
     public let thresholds: Thresholds

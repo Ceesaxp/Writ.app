@@ -26,7 +26,8 @@ final class PreviewBridge {
     var documentDirectory: URL?
 
     init(parser: any MarkdownParser) {
-        self.scheduler = PreviewScheduler(parser: parser)
+        let mode = LargeDocumentMode(thresholds: .fromDefaults())
+        self.scheduler = PreviewScheduler(parser: parser, largeMode: mode)
     }
 
     deinit {
