@@ -36,6 +36,8 @@ final class PreviewViewController: NSViewController {
     var onReady: (() -> Void)?
     var onRendered: ((DocumentRevision) -> Void)?
 
+    private(set) var schemeHandler: WritDocSchemeHandler!
+
     override func loadView() {
         let configuration = WKWebViewConfiguration()
         let controller = WKUserContentController()
@@ -43,6 +45,13 @@ final class PreviewViewController: NSViewController {
         controller.add(messageHelper, name: "writ")
         self.messageHelper = messageHelper
         configuration.userContentController = controller
+
+        // Register the writ-doc:// scheme so document-relative <img src>
+        // attributes can be resolved without widening the WebView's
+        // file:// sandbox grant.
+        let handler = WritDocSchemeHandler()
+        configuration.setURLSchemeHandler(handler, forURLScheme: WritDocSchemeHandler.scheme)
+        self.schemeHandler = handler
 
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 600, height: 600), configuration: configuration)
         let navHelper = PreviewNavigationHelper()
@@ -62,9 +71,11 @@ final class PreviewViewController: NSViewController {
     }
 
     private var hasIssuedLoad = false
-    /// Document directory used to expand the read-access scope so relative
-    /// image references in the markdown source resolve to neighbouring files.
-    var documentDirectory: URL?
+    /// Document directory used to resolve `writ-doc://` URLs to local files.
+    /// Updated by `DocumentWindowController` when the document gains a URL.
+    var documentDirectory: URL? {
+        didSet { schemeHandler?.baseDirectory = documentDirectory }
+    }
 
     override func viewWillAppear() {
         super.viewWillAppear()

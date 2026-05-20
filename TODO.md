@@ -12,77 +12,50 @@ All exit criteria met. Decisions and baseline numbers in `docs/03-M0-DECISIONS.m
 
 ## M1 — P0 core editor + preview — **largely done** (commit `cedc369`)
 
-P0 gate items:
+All P0 gate items met. See git log for details.
 
-- [x] Document-based macOS app with `.md` / `.markdown` / `.txt` types
-- [x] AppKit/TextKit 2 editor (NSTextView + NSScrollView)
-- [x] Open/save round-trip preserves UTF-8; BOM detection + CP1252/Latin-1 fallback
-- [x] Native editing behaviors (undo, redo, find/replace, native tabs, autosave/Versions, spellcheck)
-- [x] Persistent `WKWebView` preview, single shell load, JS-driven updates
-- [x] Source / Split / Preview split modes + `⌥⌘1/2/3` shortcuts + toolbar segment
-- [x] Debounced preview pipeline with stale-result rejection
-- [x] Manual refresh menu command (`⌘R`)
-- [x] Basic GFM rendering (headings, paragraphs, emphasis, links, images, lists, blockquotes, tables, task lists, strikethrough, fenced code)
-- [x] Code highlighting in preview (highlight.js, github + github-dark themes)
-- [x] Dark/light aware default CSS (CSS prefers-color-scheme + bundled theme.css)
-- [x] HTML export menu wired; PDF export uses `WKPDFConfiguration`
-- [x] Large document mode threshold logic; debounce defaults
-- [x] Off-main parsing via `PreviewScheduler` actor
-- [x] 28 → 40 SPM tests passing; zero Swift 6 concurrency warnings
-- [x] Inline render errors via `RenderStatus` and status bar
-
-Remaining (non-blocking polish):
-- [ ] Programmatic `⌘R` regression test (currently manual)
-- [ ] PDF export programmatic smoke test (currently manual)
-- [ ] Strict P0 perf gate measurement at exact 1 MB / 5 MB warm-launch boundaries (best-effort number: 1 MB → 1049 ms, 10 KB → 912 ms)
+Outstanding M1 polish items (non-blocking, circle back as the session permits):
+- [ ] Programmatic `⌘R` manual-refresh regression test (currently exercised manually)
+- [ ] PDF export programmatic smoke test (currently exercised manually)
+- [ ] Strict P0 perf gate measurements at exact 1 MB / 5 MB warm-launch boundaries (best-effort numbers were 1 MB → 1049 ms, 10 KB → 912 ms during M0)
 - [ ] Undo/redo through `applyEditorText` round-trip regression test
 
 ---
 
-## M2 — P1 technical Markdown — **in progress** (commit `b7dee04`)
+## M2 — P1 technical Markdown — **largely done** (commit `b7dee04`+)
 
-Done:
-- [x] GitHub-compatible math authoring: inline `$...$`, block `$$...$$`, fenced ```math (preprocessor + placeholder pipeline)
-- [x] KaTeX integration with MathJax bundled as runtime alternate (`Writ.setMathRenderer`)
-- [x] Mermaid fenced block rendering (Mermaid.js 11.4.1)
-- [x] **Content-hash cache** for math and Mermaid blocks (JS-side LRU, 256 entries, clears on renderer switch)
-- [x] **Render cancellation/coalescing** (PreviewScheduler with revision tracking)
-- [x] **Stable preview block IDs** (`data-writ-id` on every emitted block)
-- [x] **Approximate source-to-preview scroll sync** (one-way proportional)
-- [x] Status bar: word count + line / column + render status
-- [x] Insert-block commands: Code (`⌥⌘K`), Math (`⌥⌘M`), Mermaid (`⌥⌘D`)
-- [x] PlantUML fence recognized; rendered as source with non-blocking notice
+All headline P1 features shipped: GFM-compatible math, KaTeX + MathJax, Mermaid, JS render cache, technical-aware HTML export, status bar, insert-block menu, table alignment, etc.
 
-Remaining:
-- [ ] Referenced `.svg` / `.png` / `.jpg` image support via standard `![](image.svg)` syntax — initial attempt (commit `66f4cfe`) widened WKWebView's `allowingReadAccessTo` to the common ancestor of bundle and document dir, but for sandboxed apps WebKit rejects any URL outside the sandbox grant ("Ignoring request to load this main resource because it is outside the sandbox") and the preview goes blank. Reverted in `<NEXT>`. Proper fix is a `WKURLSchemeHandler` for `writ-doc://` that resolves against the document's security-scoped URL.
-- [ ] Preview HTML sanitization pass (defense in depth — content already comes from a trusted parser, but bare inline HTML in source bypasses parser sanitization)
-- [ ] Two-way scroll sync with feedback-suppression
-- [ ] Export preserving rendered math/mermaid (capture rendered SVG from live preview into export HTML)
-- [ ] Tests for insert-block helpers
-- [ ] Tests for scroll-sync delegate hook
+Outstanding M2 items:
+- [ ] **Referenced local `.svg` / `.png` / `.jpg`** via standard `![](file)` syntax. Initial attempt (commit `66f4cfe`) widened WKWebView's `allowingReadAccessTo` to the common ancestor of bundle and document dir; for documents outside the sandbox grant WebKit refused the load and the preview went blank. Reverted in `c733434`. The right fix is a `WKURLSchemeHandler` for a `writ-doc://` scheme that resolves against the document's security-scoped URL.
+- [ ] Two-way scroll sync (preview → editor). Editor → preview is block-aware (M3 commit `e7e21f0`).
+- [ ] Preview sanitization for inline HTML coming from the source (defense in depth — content already passes through swift-markdown, but raw `<script>` in source would currently pass through).
+- [ ] Auto-pair brackets / quotes / fenced markers — user-visible editing polish (intercepts `( [ { " ' * _ \` `, inserts the closing char with cursor between).
+- [ ] Tests for insert-block helpers and the scroll-sync delegate hook.
 
 ---
 
-## M3 — P2 workflow + robustness (in progress, commit `04ce009`)
+## M3 — P2 workflow + robustness — **mostly done** (commits `04ce009` … `74190c7`)
 
 Done:
-- [x] **External file change detection** — `WritDocument.presentedItemDidChange` shows an NSAlert sheet, with the unsaved-edits path warning the user before clobbering local changes; clean docs get a simpler Reload/Ignore prompt; `revert(toContentsOf:)` + `applyLoadedSource` keeps editor and preview in lock-step.
-- [x] **Optional line numbers** — custom `LineNumberGutter` NSView (not `NSRulerView` — that didn't render visibly with TextKit 2) walks `NSTextLayoutManager.enumerateTextLayoutFragments` to paint right-aligned 1-indexed source-line numbers in a 44pt gutter alongside the scroll view. Default ON; toggle via View > Show Line Numbers (⌥⌘L); persists in UserDefaults.
+- [x] **External file change detection** — `WritDocument.presentedItemDidChange` shows an NSAlert sheet, unsaved-edits aware, `revert(toContentsOf:)` keeps editor + preview in sync.
+- [x] **Optional line numbers** — custom `LineNumberGutter` NSView walks `NSTextLayoutManager.enumerateTextLayoutFragments`, top-aligns numbers on wrapped lines. Default on; View > Show Line Numbers (⌥⌘L).
+- [x] **AST-driven incremental syntax highlighter** — `SyntaxSpanExtractor` builds spans from `swift-markdown`'s tree + line-level scans for math / list / task / table separators; honours block boundaries.
+- [x] **Block-aware scroll sync** — `HTMLEmitter` emits `data-writ-line`; preview JS `scrollToSourceLine(line, fallback)` aligns the matching block.
+- [x] **Improved HTML export bundling** — inlines theme + KaTeX + highlight.js CSS so exported math, code, and typography render without external assets.
+- [x] **Simple folder open + quick open** — File > Open Folder… (⇧⌘O) opens a `FolderWindowController` listing markdown files; top search field filters and Return opens the top hit.
+- [x] **Render diagnostics in preview** — sticky ribbon at top of preview counts mermaid/math/missing-image errors; click-to-jump scrolls to first issue.
+- [x] **Configurable large-document thresholds** — PreferencesWindowController (⌘,) edits byte/line thresholds, debounce intervals, line-numbers toggle; persisted in `UserDefaults`.
 
 Remaining:
-- [ ] Incremental / range-aware editor syntax highlighting (currently regex-pass with 80 ms debounce, 500 KB cap)
-- [ ] Better scroll sync (block-aware rather than proportional)
-- [ ] Improved find/replace behavior for large documents
-- [ ] Improved HTML export bundling (relative images, asset directory)
-- [ ] Simple folder open + quick open
-- [ ] Render diagnostics (malformed math, mermaid parse errors, missing local images)
-- [ ] Configurable large-document thresholds (preferences pane)
+- [ ] Find/replace verification on 5 MB+ documents (NSTextFinder is wired and should already work; not actually stress-tested in this session).
+- [ ] Folder window: file-system watching so the list refreshes when files appear/disappear externally (currently snapshots on open).
 
 ---
 
 ## M4 — P3 deferred
 
-(Per MVP plan §3 M4.)
+(Per MVP plan §3 M4. Untouched.)
 
 - [ ] Optional local PlantUML rendering
 - [ ] Sanitized inline SVG injection
