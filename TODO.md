@@ -55,10 +55,42 @@ Remaining:
 
 ## M4 — P3 deferred
 
-(Per MVP plan §3 M4. Untouched.)
+Per MVP plan §3 M4. Priorities re-confirmed 2026-05-20:
 
-- [ ] Optional local PlantUML rendering
-- [ ] Sanitized inline SVG injection
-- [ ] DOM patching preview updates (only if measurement proves full reload becomes inadequate)
-- [ ] Theme system
-- [ ] Deeper folder/workspace features
+- [ ] **Sanitized inline SVG injection** — green-lit for next pass.
+      Currently `<svg>` from the source survives `HTMLSanitizer` but
+      isn't actually sanitised for `<script>` / event handlers
+      nested inside the SVG itself. M4 should add SVG-aware
+      sanitisation (allow shape/path/text elements; strip script,
+      foreignObject, on* attributes, javascript: hrefs).
+- [ ] Optional local PlantUML rendering — **deferred** post-MVP.
+- [ ] DOM patching preview updates — **gated** on measurement;
+      only pursue if full-reload becomes inadequate.
+- [ ] Theme system — **deferred** until MVP is fully done.
+- [ ] Deeper folder/workspace features — **scope undefined**;
+      MVP plan kept this open ("if user demand is validated").
+      Candidate scopes if/when picked up: tree view vs flat list,
+      full-text search across folder, drag-and-drop file moves,
+      recent-folders persistence, `.gitignore`-aware filtering,
+      multi-window same-folder state. No concrete commitment yet.
+
+---
+
+## Nice improvements — proposed 2026-05-20
+
+Outside the strict M0–M4 plan. Bundle into a post-MVP polish pass.
+
+- [ ] **Monospace font picker in Settings** — let the user choose
+      from a small curated list of monospace fonts for the editor
+      pane (e.g. SF Mono, Menlo, JetBrains Mono if installed,
+      Iosevka if installed, system default). Persist in
+      `UserDefaults`; apply live to all open editors.
+- [ ] **Language tag chip in Preview code blocks** — show a small
+      muted-text label in the top-right of each `<pre>` indicating
+      the language (e.g. `swift`, `python`, `json`). Already emitted
+      via `class="language-foo"`; needs CSS + a tiny DOM hook in
+      `writ.js`. Plays nicely with hljs.
+- [ ] **Optional TOC for HTML / PDF export** — opt-in checkbox in
+      the export Save panel (or in Settings as a default). Build
+      from `OutlineExtractor` headings; emit as a leading `<nav>`
+      block in HTML and a first-page TOC in PDF.
