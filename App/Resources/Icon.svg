@@ -1,0 +1,46 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="Writ icon" role="img">
+  <defs>
+    <linearGradient id="nibGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00ff88"/>
+      <stop offset="100%" stop-color="#00ccff"/>
+    </linearGradient>
+    <linearGradient id="paperGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#07070d"/>
+      <stop offset="100%" stop-color="#0e0e18"/>
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a2a"/>
+      <stop offset="100%" stop-color="#070710"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App-icon backdrop with rounded corners (macOS will round further, but
+       a tinted rect ensures the icon reads on light and dark Dock backgrounds). -->
+  <rect x="0" y="0" width="100" height="100" rx="22" ry="22" fill="url(#bgGrad)"/>
+
+  <!-- Paper / document with folded corner -->
+  <path d="M18 12 L62 12 L82 32 L82 88 L18 88 Z"
+        fill="url(#paperGrad)" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M62 12 L62 32 L82 32"
+        fill="none" stroke="#00ff88" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- Markdown heading marker (#) -->
+  <text x="27" y="50" font-family="ui-monospace, 'SF Mono', Menlo, monospace"
+        font-size="20" font-weight="800" fill="#00ccff" letter-spacing="-1">#</text>
+  <!-- Heading underline -->
+  <line x1="43" y1="46" x2="73" y2="46" stroke="#00ccff" stroke-width="3"
+        stroke-linecap="round" opacity="0.35"/>
+
+  <!-- Body lines -->
+  <line x1="27" y1="62" x2="74" y2="62" stroke="#6a6a88" stroke-width="2" stroke-linecap="round"/>
+  <line x1="27" y1="70" x2="66" y2="70" stroke="#6a6a88" stroke-width="2" stroke-linecap="round"/>
+  <line x1="27" y1="78" x2="58" y2="78" stroke="#44445a" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Cursor caret (static in the icon — animation is for the web site only) -->
+  <rect x="60" y="73" width="2.5" height="9" fill="#ff8844"/>
+
+  <!-- Pen nib mark in the folded corner -->
+  <path d="M70 20 L78 28 L74 32 L66 24 Z"
+        fill="url(#nibGrad)" stroke="none" opacity="0.85"/>
+  <line x1="70" y1="20" x2="74" y2="32" stroke="#07070d" stroke-width="1"/>
+</svg>
