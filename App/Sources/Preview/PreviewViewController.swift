@@ -35,6 +35,9 @@ final class PreviewViewController: NSViewController {
 
     var onReady: (() -> Void)?
     var onRendered: ((DocumentRevision) -> Void)?
+    /// Called when the preview pane's top visible source line changes
+    /// (preview → editor scroll sync). 1-indexed.
+    var onPreviewScrolled: ((Int) -> Void)?
 
     private(set) var schemeHandler: WritDocSchemeHandler!
 
@@ -155,6 +158,10 @@ final class PreviewViewController: NSViewController {
                 previewLog.error("JS: \(message, privacy: .public)")
             } else {
                 previewLog.notice("JS \(level, privacy: .public): \(message, privacy: .public)")
+            }
+        case "previewScrolled":
+            if let line = body["line"] as? Int {
+                onPreviewScrolled?(line)
             }
         default:
             break

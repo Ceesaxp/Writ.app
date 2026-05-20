@@ -72,7 +72,7 @@ struct HTMLEmitter: MarkupWalker {
             }
         case let html as HTMLBlock:
             let id = nextBlockID("html")
-            out.append("<div data-writ-id=\"\(id)\"\(lineAttr)>\(html.rawHTML)</div>\n")
+            out.append("<div data-writ-id=\"\(id)\"\(lineAttr)>\(HTMLSanitizer.sanitize(html.rawHTML))</div>\n")
         case let list as UnorderedList:
             let id = nextBlockID("ul")
             out.append("<ul data-writ-id=\"\(id)\"\(lineAttr)>\n")
@@ -188,7 +188,7 @@ struct HTMLEmitter: MarkupWalker {
             let alt = image.plainText
             out.append("<img src=\"\(src)\" alt=\"\(escape(alt))\">")
         case let html as InlineHTML:
-            out.append(html.rawHTML)
+            out.append(HTMLSanitizer.sanitize(html.rawHTML))
         case is LineBreak:
             out.append("<br>\n")
         case is SoftBreak:

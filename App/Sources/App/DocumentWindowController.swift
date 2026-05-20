@@ -85,6 +85,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         let docDir = document.fileURL?.deletingLastPathComponent()
         preview.documentDirectory = docDir
         document.bridge.documentDirectory = docDir
+        preview.onPreviewScrolled = { [weak self] line in
+            self?.editor.scrollToSourceLine(line)
+        }
         window.makeFirstResponder(editor.textView)
         window.setFrameAutosaveName("WritMainWindow")
     }

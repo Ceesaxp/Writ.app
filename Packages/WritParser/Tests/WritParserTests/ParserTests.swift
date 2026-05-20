@@ -152,6 +152,28 @@ struct ParserTests {
         #expect(kinds.contains(.mathBlock))
     }
 
+    @Test("HTMLSanitizer strips script tags and event handlers")
+    func sanitizer() {
+        let input = """
+        <p>safe</p><script>alert(1)</script>
+        <a href="javascript:bad()" onclick="bad()">link</a>
+        <img src=\"x\" onerror=\"bad()\">
+        """
+        let cleaned = HTMLSanitizer.sanitize(input)
+        #expect(!cleaned.contains("<script"))
+        #expect(!cleaned.contains("onclick"))
+        #expect(!cleaned.contains("onerror"))
+        #expect(!cleaned.contains("javascript:"))
+        #expect(cleaned.contains("safe"))
+    }
+
+    @Test("HTMLSanitizer leaves safe HTML alone")
+    func sanitizerSafe() {
+        let input = "<div class=\"x\"><strong>bold</strong> <em>italic</em></div>"
+        let cleaned = HTMLSanitizer.sanitize(input)
+        #expect(cleaned == input)
+    }
+
     @Test("Span extractor recognises list/task markers and tables")
     func spansLineLevel() {
         let src = """

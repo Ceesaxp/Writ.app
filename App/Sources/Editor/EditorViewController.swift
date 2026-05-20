@@ -128,6 +128,7 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     private var lastScrollRatio: Double = 0
     @objc private func scrollViewDidScroll(_ note: Notification) {
+        if suppressScrollNotify { return }
         guard let contentView = scrollView.contentView as NSClipView? else { return }
         let docHeight = scrollView.documentView?.frame.height ?? 0
         let visibleHeight = contentView.bounds.height
@@ -136,6 +137,40 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         if abs(ratio - lastScrollRatio) < 0.005 { return }
         lastScrollRatio = ratio
         delegate?.editor(self, didScrollToRatio: ratio, topSourceLine: topVisibleSourceLine())
+    }
+
+    /// Programmatically scroll so the given 1-indexed source line is at
+    /// the top of the visible area. Used by the preview → editor scroll
+    /// sync. Suppresses the editor's own scroll notification while it
+    /// performs the scroll so the two panes don't ping-pong.
+    private var suppressScrollNotify = false
+    func scrollToSourceLine(_ line: Int) {
+        guard let textLayoutManager = textView.textLayoutManager else { return }
+        // Map 1-indexed line → UTF-16 offset → text-layout fragment → frame.
+        let utf16 = currentSource.utf16
+        var lineIndex = 1
+        var consumed = 0
+        var idx = utf16.startIndex
+        while idx < utf16.endIndex && lineIndex < line {
+            if utf16[idx] == 0x0A { lineIndex += 1 }
+            idx = utf16.index(after: idx)
+            consumed += 1
+        }
+        let docStart = textLayoutManager.documentRange.location
+        guard let target = textLayoutManager.location(docStart, offsetBy: consumed) else { return }
+        textLayoutManager.ensureLayout(for: NSTextRange(location: target))
+        var targetY: CGFloat?
+        textLayoutManager.enumerateTextLayoutFragments(from: target, options: [.ensuresLayout]) { fragment in
+            targetY = fragment.layoutFragmentFrame.minY
+            return false
+        }
+        guard let y = targetY else { return }
+        suppressScrollNotify = true
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: y))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.suppressScrollNotify = false
+        }
     }
 
     /// Computes the 1-indexed source line at the top of the editor's
@@ -238,7 +273,91 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         ]
     }
 
+    // MARK: - Auto-pair (brackets, quotes, fences)
+
+    /// Characters that auto-insert their closing pair when typed. The first
+    /// element is what the user types; the second is what gets inserted
+    /// after the cursor.
+    private static let autoPairs: [(open: String, close: String)] = [
+        ("(", ")"),
+        ("[", "]"),
+        ("{", "}"),
+        ("\"", "\""),
+        ("'", "'"),
+        ("*", "*"),
+        ("_", "_"),
+        ("`", "`"),
+        ("$", "$")
+    ]
+
+    /// Called from NSTextViewDelegate.shouldChangeText. If the user is about
+    /// to insert a single auto-pair-open character at a collapsed selection,
+    /// we insert both characters and place the cursor between them — and
+    /// suppress the original change.
+    private func handleAutoPair(replacementString: String?) -> Bool {
+        guard let typed = replacementString, typed.count == 1 else { return false }
+        let selected = textView.selectedRange()
+        guard selected.length == 0 else {
+            // Selection present: wrap the selection in the pair if the typed
+            // character is one of the pair openers.
+            for pair in Self.autoPairs where pair.open == typed {
+                return wrapSelection(with: pair, range: selected)
+            }
+            return false
+        }
+        for pair in Self.autoPairs where pair.open == typed {
+            // Skip auto-pair if the next character is the closing one we'd
+            // insert — typing `)` next to `)` should just move past it,
+            // typing `"` next to `"` shouldn't double up.
+            let ns = textView.string as NSString
+            if selected.location < ns.length {
+                let next = ns.substring(with: NSRange(location: selected.location, length: 1))
+                if next == pair.close { return false }
+            }
+            // Skip if the previous character is a word character and the
+            // typed char is `'` (so contractions like "don't" still work).
+            if pair.open == "'" && selected.location > 0 {
+                let prev = ns.substring(with: NSRange(location: selected.location - 1, length: 1))
+                if !prev.isEmpty, let scalar = prev.unicodeScalars.first,
+                   scalar.properties.isAlphabetic { return false }
+            }
+            // Insert open + close, position cursor between them.
+            let combined = pair.open + pair.close
+            if textView.shouldChangeText(in: selected, replacementString: combined) {
+                textView.textStorage?.replaceCharacters(in: selected, with: combined)
+                textView.didChangeText()
+                let between = NSRange(location: selected.location + (pair.open as NSString).length, length: 0)
+                textView.setSelectedRange(between)
+                currentSource = textView.string
+                return true
+            }
+            return false
+        }
+        return false
+    }
+
+    private func wrapSelection(with pair: (open: String, close: String), range: NSRange) -> Bool {
+        let ns = textView.string as NSString
+        let selected = ns.substring(with: range)
+        let combined = pair.open + selected + pair.close
+        if textView.shouldChangeText(in: range, replacementString: combined) {
+            textView.textStorage?.replaceCharacters(in: range, with: combined)
+            textView.didChangeText()
+            // Re-select the formerly-selected text inside the new pair.
+            let inside = NSRange(location: range.location + (pair.open as NSString).length, length: (selected as NSString).length)
+            textView.setSelectedRange(inside)
+            currentSource = textView.string
+            return true
+        }
+        return false
+    }
+
     // MARK: - NSTextViewDelegate
+
+    func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        if handleAutoPair(replacementString: replacementString) { return false }
+        return true
+    }
 
     func textDidChange(_ notification: Notification) {
         guard !suppressDelegateBroadcast else { return }
