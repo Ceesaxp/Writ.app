@@ -259,7 +259,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
     }
 
-    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    // @objc is required: validateMenuItem comes from NSMenuItemValidation,
+    // and a non-@objc method on a Swift subclass is invisible to AppKit's
+    // ObjC-runtime lookup. Without it, the menu titles never refresh.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(toggleLineNumbers(_:)) {
             item.title = EditorViewController.lineNumbersEnabled ? "Hide Line Numbers" : "Show Line Numbers"
             return true
