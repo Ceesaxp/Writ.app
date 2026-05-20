@@ -157,6 +157,19 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         // notification may have already fired during setup when the
         // bounds were still the default 200×200.
         clipViewFrameDidChange(Notification(name: NSView.frameDidChangeNotification))
+        // Listen for font-preference updates so every open editor
+        // applies the new family live, without needing to reopen
+        // the document.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(editorFontPreferenceDidChange(_:)),
+            name: EditorViewController.editorFontDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func editorFontPreferenceDidChange(_ note: Notification) {
+        applyFontPreference()
     }
 
     private var lastScrollRatio: Double = 0
@@ -245,9 +258,74 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         return textView
     }
 
+    /// Curated list of monospace families the picker offers. Order is
+    /// preference order: SF Mono first because it's the system default
+    /// on modern macOS, then the most common installed families. Any
+    /// entry not actually installed on the host is filtered out at
+    /// query time (see `availableFontFamilies`).
+    static let candidateFontFamilies: [String] = [
+        "SF Mono",
+        "Menlo",
+        "Monaco",
+        "JetBrains Mono",
+        "Iosevka",
+        "Fira Code",
+        "Courier New"
+    ]
+
+    static let fontFamilyDefaultsKey = "WritEditorFontFamily"
+
+    /// Family-name preference. `nil` means "use system default" — we
+    /// fall back to `NSFont.monospacedSystemFont` so we always render
+    /// a real font even if a previously-persisted family was uninstalled.
+    static var selectedFontFamily: String? {
+        get {
+            let raw = UserDefaults.standard.string(forKey: fontFamilyDefaultsKey)
+            guard let raw, !raw.isEmpty else { return nil }
+            return raw
+        }
+        set {
+            if let v = newValue, !v.isEmpty {
+                UserDefaults.standard.set(v, forKey: fontFamilyDefaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: fontFamilyDefaultsKey)
+            }
+            NotificationCenter.default.post(name: editorFontDidChange, object: nil)
+        }
+    }
+
+    static let editorFontDidChange = Notification.Name("org.ceesaxp.Writ.editorFontDidChange")
+
+    static func availableFontFamilies() -> [String] {
+        let manager = NSFontManager.shared
+        return candidateFontFamilies.filter { family in
+            // availableMembers returns nil for uninstalled families.
+            manager.availableMembers(ofFontFamily: family) != nil
+        }
+    }
+
     static func editorFont() -> NSFont {
+        if let family = selectedFontFamily,
+           let font = NSFont(name: family, size: 13.0) {
+            return font
+        }
         if let mono = NSFont(name: "SF Mono", size: 13.0) { return mono }
         return NSFont.monospacedSystemFont(ofSize: 13.0, weight: .regular)
+    }
+
+    /// Apply the current font preference to the live text view +
+    /// existing storage. Called from the editor-font notification
+    /// observer (wired in viewWillAppear).
+    func applyFontPreference() {
+        let font = Self.editorFont()
+        textView.font = font
+        if let storage = textView.textStorage {
+            let range = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            storage.addAttribute(.font, value: font, range: range)
+            storage.endEditing()
+        }
+        scheduleHighlight()
     }
 
     private func applyLineNumberPreference() {

@@ -15,10 +15,11 @@ final class PreferencesWindowController: NSWindowController {
     private let debounceNormalField = NSTextField()
     private let debounceLargeField = NSTextField()
     private let lineNumbersCheckbox = NSButton(checkboxWithTitle: "Show line numbers", target: nil, action: nil)
+    private let fontPopup = NSPopUpButton()
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 330),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -62,6 +63,20 @@ final class PreferencesWindowController: NSWindowController {
         lineNumbersCheckbox.target = self
         lineNumbersCheckbox.action = #selector(lineNumbersToggled(_:))
 
+        let fontLabel = NSTextField(labelWithString: "Editor font:")
+        fontLabel.translatesAutoresizingMaskIntoConstraints = false
+        fontLabel.font = NSFont.systemFont(ofSize: 13)
+
+        fontPopup.translatesAutoresizingMaskIntoConstraints = false
+        fontPopup.target = self
+        fontPopup.action = #selector(fontFamilyChanged(_:))
+        fontPopup.addItem(withTitle: "System Monospace")
+        fontPopup.lastItem?.representedObject = NSNull() // sentinel for "no override"
+        for family in EditorViewController.availableFontFamilies() {
+            fontPopup.addItem(withTitle: family)
+            fontPopup.lastItem?.representedObject = family
+        }
+
         let resetButton = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults(_:)))
         resetButton.translatesAutoresizingMaskIntoConstraints = false
         resetButton.bezelStyle = .rounded
@@ -76,6 +91,8 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(largeLabel)
         contentView.addSubview(debounceLargeField)
         contentView.addSubview(lineNumbersCheckbox)
+        contentView.addSubview(fontLabel)
+        contentView.addSubview(fontPopup)
         contentView.addSubview(resetButton)
 
         let row1Y = contentView.bottomAnchor
@@ -119,7 +136,15 @@ final class PreferencesWindowController: NSWindowController {
             lineNumbersCheckbox.topAnchor.constraint(equalTo: largeLabel.bottomAnchor, constant: 16),
             lineNumbersCheckbox.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
 
-            resetButton.topAnchor.constraint(equalTo: lineNumbersCheckbox.bottomAnchor, constant: 16),
+            fontLabel.topAnchor.constraint(equalTo: lineNumbersCheckbox.bottomAnchor, constant: 16),
+            fontLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            fontLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            fontPopup.centerYAnchor.constraint(equalTo: fontLabel.centerYAnchor),
+            fontPopup.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            fontPopup.widthAnchor.constraint(equalToConstant: 200),
+
+            resetButton.topAnchor.constraint(equalTo: fontLabel.bottomAnchor, constant: 16),
             resetButton.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor)
         ])
         _ = row1Y
@@ -132,6 +157,17 @@ final class PreferencesWindowController: NSWindowController {
         debounceNormalField.integerValue = Int(thresholds.debounceNormal.milliseconds)
         debounceLargeField.integerValue = Int(thresholds.debounceLarge.milliseconds)
         lineNumbersCheckbox.state = EditorViewController.lineNumbersEnabled ? .on : .off
+        // Select the persisted font family if it's still in the menu,
+        // otherwise fall back to "System Monospace".
+        let current = EditorViewController.selectedFontFamily
+        let matchIndex = fontPopup.itemArray.firstIndex {
+            ($0.representedObject as? String) == current
+        }
+        fontPopup.selectItem(at: matchIndex ?? 0)
+    }
+
+    @objc private func fontFamilyChanged(_ sender: NSPopUpButton) {
+        EditorViewController.selectedFontFamily = sender.selectedItem?.representedObject as? String
     }
 
     @objc private func fieldDidCommit(_ sender: NSTextField) {
@@ -151,6 +187,7 @@ final class PreferencesWindowController: NSWindowController {
     @objc private func restoreDefaults(_ sender: Any?) {
         LargeDocumentMode.Thresholds.default.persist()
         EditorViewController.lineNumbersEnabled = true
+        EditorViewController.selectedFontFamily = nil
         loadFromDefaults()
     }
 }
