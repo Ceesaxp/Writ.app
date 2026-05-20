@@ -27,11 +27,11 @@ Outstanding M1 polish items (non-blocking, circle back as the session permits):
 All headline P1 features shipped: GFM-compatible math, KaTeX + MathJax, Mermaid, JS render cache, technical-aware HTML export, status bar, insert-block menu, table alignment, etc.
 
 Outstanding M2 items:
-- [ ] **Referenced local `.svg` / `.png` / `.jpg`** via standard `![](file)` syntax. Initial attempt (commit `66f4cfe`) widened WKWebView's `allowingReadAccessTo` to the common ancestor of bundle and document dir; for documents outside the sandbox grant WebKit refused the load and the preview went blank. Reverted in `c733434`. The right fix is a `WKURLSchemeHandler` for a `writ-doc://` scheme that resolves against the document's security-scoped URL.
-- [ ] Two-way scroll sync (preview → editor). Editor → preview is block-aware (M3 commit `e7e21f0`).
-- [ ] Preview sanitization for inline HTML coming from the source (defense in depth — content already passes through swift-markdown, but raw `<script>` in source would currently pass through).
-- [ ] Auto-pair brackets / quotes / fenced markers — user-visible editing polish (intercepts `( [ { " ' * _ \` `, inserts the closing char with cursor between).
-- [ ] Tests for insert-block helpers and the scroll-sync delegate hook.
+- [x] **Referenced local `.svg` / `.png` / `.jpg`** (commit `e9af7ea`) — `WritDocSchemeHandler` resolves `writ-doc:///<path>` against the document's directory, sandbox-safe.
+- [x] **Two-way scroll sync** (commit `4012bab`) — writ.js posts `previewScrolled` on debounced scroll; the editor scrolls to match. Ping-pong is prevented by mutual suppression flags.
+- [x] **Preview sanitization** (commit `4012bab`) — `HTMLSanitizer` strips dangerous tags + event handlers + `javascript:` URLs from raw `HTMLBlock` / `InlineHTML` source.
+- [x] **Auto-pair brackets / quotes / fence markers** (commit `4012bab`) — `EditorViewController.handleAutoPair` inserts the closing pair and positions the cursor between; wraps existing selections; smart skip past closing chars; apostrophe-after-letter preserved for contractions.
+- [ ] Tests for insert-block helpers and the scroll-sync delegate hook (both depend on an NSTextView harness; deferred).
 
 ---
 
