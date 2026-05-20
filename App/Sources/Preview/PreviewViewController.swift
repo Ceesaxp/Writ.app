@@ -136,6 +136,16 @@ final class PreviewViewController: NSViewController {
         previewLog.error("navigation failed: \(error.localizedDescription, privacy: .public)")
     }
 
+    /// Called by the navigation helper when WebKit's WebContent process
+    /// dies (out of memory, crash, sandbox kill, etc.). The WebView is
+    /// still alive but has no content. Issue a fresh load of the shell
+    /// so the user gets the preview back without restarting the app.
+    func webContentProcessDidTerminate() {
+        isReady = false
+        previewLog.notice("re-loading shell after WebContent crash")
+        loadShell()
+    }
+
     func didReceiveMessage(type: String, body: [String: Any]) {
         switch type {
         case "ready":
@@ -504,6 +514,16 @@ final class PreviewNavigationHelper: NSObject, WKNavigationDelegate {
         previewLog.error("navigation didFailProvisional: \(error.localizedDescription, privacy: .public)")
         owner?.didFailNavigationCallback(error)
     }
+
+    // Fires when WebKit's WebContent process terminates — the most common
+    // cause of "WKWebView is alive but never loaded anything" since the
+    // delegate methods above never fire if the process dies during the
+    // initial load.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        previewLog.error("WebContent process terminated — preview will be unable to load anything")
+        owner?.webContentProcessDidTerminate()
+    }
+
 }
 
 /// NSObject target used by `NSPrintOperation.runModal(for:delegate:didRun:contextInfo:)`.
