@@ -67,12 +67,19 @@ final class MarkdownSyntaxHighlighter {
         NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil ? darkStyle : lightStyle
     }
 
+    /// Side-channel return: the ranges of code-block spans found in the
+    /// most recent highlight pass. The editor hands these to its
+    /// `CodeBlockBackgroundDelegate` so the full-width background drawing
+    /// can target the right fragments.
+    private(set) var codeBlockRanges: [NSRange] = []
+
     @MainActor
     func applyHighlight(to storage: NSTextStorage?, source: String, baseAttributes: [NSAttributedString.Key: Any]) async {
         guard let storage else { return }
         let style = Self.current
         let spans = extractor.extract(from: source)
         let fullRange = NSRange(location: 0, length: (source as NSString).length)
+        codeBlockRanges = spans.compactMap { $0.kind == .codeBlock ? $0.range : nil }
 
         storage.beginEditing()
         storage.setAttributes(baseAttributes, range: fullRange)

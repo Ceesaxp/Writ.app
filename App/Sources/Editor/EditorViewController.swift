@@ -92,6 +92,9 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         self.scrollView = scroll
         self.textView = textView
 
+        // The WritTextView subclass paints its own full-width code-block
+        // background in drawBackground(in:). Nothing more to wire up here.
+
         // Wrap the scroll view in a container so a custom line-number gutter
         // can sit alongside it (we don't use NSRulerView — see
         // LineNumberGutter for the reason).
@@ -200,9 +203,16 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     }
 
     private func makeTextView() -> NSTextView {
-        // Force TextKit 2 layout. Available since macOS 13; on macOS 14+ this
-        // is the default but we still set it explicitly.
-        let textView = NSTextView(usingTextLayoutManager: true)
+        // Custom NSTextView subclass paints a full-width background behind
+        // fenced code-block ranges before super.drawBackground draws the
+        // editor's normal background.
+        let frame = NSRect(x: 0, y: 0, width: 200, height: 200)
+        let textContainer = NSTextContainer(size: NSSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
+        let textLayoutManager = NSTextLayoutManager()
+        textLayoutManager.textContainer = textContainer
+        let textContentStorage = NSTextContentStorage()
+        textContentStorage.addTextLayoutManager(textLayoutManager)
+        let textView = WritTextView(frame: frame, textContainer: textContainer)
         return textView
     }
 
@@ -400,11 +410,16 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         highlightThrottle = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(80))
             if Task.isCancelled { return }
-            // M0: viewport-aware highlighting is deferred to M3. For now we
-            // disable heavy highlighting on large documents to keep typing
-            // responsive — only basic default attributes are applied.
+            guard let self else { return }
+            // Disable heavy highlighting on large documents to keep typing
+            // responsive — only base attributes are applied.
             guard snapshot.utf8.count < 500_000 else { return }
-            await self?.syntaxHighlighter.applyHighlight(to: storage, source: snapshot, baseAttributes: attrs)
+            await self.syntaxHighlighter.applyHighlight(to: storage, source: snapshot, baseAttributes: attrs)
+            // Push the code-block ranges to the WritTextView so its
+            // drawBackground pass can paint full-width fills.
+            if let writTextView = self.textView as? WritTextView {
+                writTextView.codeBlockRanges = self.syntaxHighlighter.codeBlockRanges
+            }
         }
     }
 }
