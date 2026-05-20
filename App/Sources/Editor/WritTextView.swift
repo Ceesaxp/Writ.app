@@ -22,6 +22,24 @@ final class WritTextView: NSTextView {
         didSet { needsDisplay = true }
     }
 
+    // TextKit 2's NSTextLayoutManager does not honour the legacy
+    // `widthTracksTextView` flag the way TextKit 1 did — the text
+    // container holds onto whatever width it was first sized with,
+    // so lines wrap at that fixed width regardless of the actual
+    // visible area. Bridge it manually by resizing the container
+    // every time the text view's frame width changes.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard let container = textContainer else { return }
+        // Subtract both edges' line-fragment padding so the wrap point
+        // matches the visible text column, not the container edge.
+        let padding = container.lineFragmentPadding * 2
+        let width = max(0, newSize.width - padding)
+        if container.size.width != width {
+            container.size = NSSize(width: width, height: container.size.height)
+        }
+    }
+
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard !codeBlockRanges.isEmpty,

@@ -119,7 +119,17 @@ struct HTMLEmitter: MarkupWalker {
         } else {
             out.append("<li>")
         }
-        for child in item.children { visitChild(child) }
+        // Tight-list rendering: if the item has a single Paragraph
+        // child (the common case — including every task-list item),
+        // emit its inlines directly so the checkbox and label stay on
+        // the same visual line. Otherwise fall back to full block
+        // rendering so nested lists / quotes / code still display.
+        let childArray = Array(item.children)
+        if childArray.count == 1, let paragraph = childArray[0] as? Paragraph {
+            emitInlines(paragraph.children)
+        } else {
+            for child in childArray { visitChild(child) }
+        }
         out.append("</li>\n")
     }
 

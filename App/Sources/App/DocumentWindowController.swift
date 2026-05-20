@@ -102,7 +102,15 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             self?.editor.scrollToSourceLine(line)
         }
         outline.onSelectHeading = { [weak self] heading in
-            self?.editor.scrollToSourceLine(heading.line)
+            guard let self else { return }
+            // Scroll the editor first so the source line is on screen,
+            // then nudge the preview directly. Editor's scroll-observer
+            // is debounced/suppressed during programmatic scrolls and
+            // wouldn't fire the editor→preview sync, so the preview
+            // would otherwise stay where it was until the user touched
+            // the editor.
+            self.editor.scrollToSourceLine(heading.line)
+            self.preview.scrollToSourceLine(heading.line, fallbackRatio: 0)
         }
         window.makeFirstResponder(editor.textView)
         window.setFrameAutosaveName("WritMainWindow")

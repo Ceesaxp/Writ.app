@@ -36,6 +36,46 @@ struct OutlineTests {
     func noHeadings() {
         #expect(OutlineExtractor.extract(from: "Just a paragraph.").isEmpty)
     }
+
+    @Test("Math blocks containing `=` are not interpreted as setext headings")
+    func mathContentIsNotASetextUnderline() {
+        // Inside a `$$...$$` block a bare `=` line is a perfectly valid
+        // LaTeX equality marker. CommonMark would otherwise treat the
+        // preceding text as a setext H1 — verify the outline ignores it.
+        let src = """
+        # Real heading
+
+        $$
+        a
+        =
+        b
+        $$
+
+        ## Second
+        """
+        let outline = OutlineExtractor.extract(from: src)
+        #expect(outline.count == 2)
+        #expect(outline.map(\.title) == ["Real heading", "Second"])
+        #expect(outline.map(\.level) == [1, 2])
+    }
+
+    @Test("Math masking preserves line numbers")
+    func lineNumbersStayAlignedAfterMath() {
+        let src = """
+        # Top
+
+        $$
+        x = 1
+        $$
+
+        ## Below
+        """
+        let outline = OutlineExtractor.extract(from: src)
+        // Second heading is on line 7 in the original source — it must
+        // stay line 7 after the mask is applied (the multi-line math
+        // block above must not collapse line numbers).
+        #expect(outline.last?.line == 7)
+    }
 }
 
 @Suite("BlockTemplate")
