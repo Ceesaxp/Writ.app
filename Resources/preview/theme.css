@@ -95,8 +95,30 @@ pre {
   border-radius: 6px;
   overflow-x: auto;
   margin: 0 0 1em;
+  position: relative;
 }
 pre code { background: transparent; padding: 0; }
+
+/* Language tag chip — populated by writ.js for any code block whose
+   <code> element carries a `language-<name>` class. Sits in the
+   top-right corner, kept out of the user's selection by the
+   user-select rule. */
+pre[data-writ-lang]::before {
+  content: attr(data-writ-lang);
+  position: absolute;
+  top: 0.5em;
+  right: 0.75em;
+  font-family: var(--writ-mono-font);
+  font-size: 0.7em;
+  color: var(--writ-fg-muted);
+  background: var(--writ-bg-alt);
+  padding: 0.05em 0.5em;
+  border-radius: 999px;
+  border: 1px solid var(--writ-border);
+  user-select: none;
+  pointer-events: none;
+  opacity: 0.85;
+}
 
 table { border-collapse: collapse; margin: 0 0 1em; width: 100%; }
 th, td { border: 1px solid var(--writ-border); padding: 0.4em 0.7em; text-align: left; }
