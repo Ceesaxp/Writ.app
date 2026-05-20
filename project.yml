@@ -38,13 +38,10 @@ targets:
     platform: macOS
     sources:
       - path: App/Sources
-      - path: App/Resources
-        type: folder
+      - path: App/Resources/Assets.xcassets
       - path: Resources/preview
         type: folder
         buildPhase: resources
-    resources:
-      - path: App/Resources/Assets.xcassets
     info:
       path: App/Info.plist
       properties:

@@ -261,7 +261,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(toggleLineNumbers(_:)) {
-            item.state = EditorViewController.lineNumbersEnabled ? .on : .off
+            item.title = EditorViewController.lineNumbersEnabled ? "Hide Line Numbers" : "Show Line Numbers"
             return true
         }
         if item.action == #selector(toggleOutline(_:)) {
