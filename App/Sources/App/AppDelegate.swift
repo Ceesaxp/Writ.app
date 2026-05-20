@@ -10,8 +10,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         app.run()
     }
 
+    // In --bench mode, refuse to open the extra argv paths as documents.
+    // AppKit otherwise interprets `--bench <fixtures> <results.json>` as
+    // "open these three files", spawning modal error sheets that block
+    // the bench runner's WKWebView shell load.
+    private var inBenchMode: Bool {
+        CommandLine.arguments.contains("--bench")
+    }
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        if inBenchMode { return true } // swallow silently
+        return false // let the default document controller handle it
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        if inBenchMode {
+            sender.reply(toOpenOrPrint: .success)
+            return
+        }
+        // Default behavior: route each through NSDocumentController.
+        for path in filenames {
+            NSDocumentController.shared.openDocument(
+                withContentsOf: URL(fileURLWithPath: path),
+                display: true
+            ) { _, _, _ in }
+        }
+        sender.reply(toOpenOrPrint: .success)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if CommandLine.arguments.contains("--bench") {
+        if inBenchMode {
             BenchmarkMode.run()
             return
         }
