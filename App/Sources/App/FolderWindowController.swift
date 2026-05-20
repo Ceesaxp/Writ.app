@@ -26,6 +26,13 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     /// Off-main enumeration task. Cancelled when the window closes so
     /// large or network-backed folders don't keep walking the tree.
     private var loadTask: Task<Void, Never>?
+    /// FSEvents-backed watcher that triggers a reload when files
+    /// appear, disappear, or are renamed anywhere under `folder`.
+    /// Created on open, torn down on window close.
+    private var watcher: FolderWatcher?
+    /// Coalesces watcher fires — multiple FSEvents bursts within
+    /// ~250 ms collapse into a single reload.
+    private var reloadDebounce: DispatchWorkItem?
 
     init(folder: URL) {
         self.folder = folder
@@ -41,6 +48,27 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSTabl
         window.delegate = self
         installContent()
         loadFiles()
+        startWatching()
+    }
+
+    private func startWatching() {
+        watcher = FolderWatcher(folder: folder) { [weak self] in
+            // FSEvents callbacks arrive on the watcher's queue; hop
+            // to main + debounce so a burst of writes coalesces into
+            // one enumeration pass.
+            DispatchQueue.main.async { [weak self] in
+                self?.scheduleReload()
+            }
+        }
+    }
+
+    private func scheduleReload() {
+        reloadDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.loadFiles()
+        }
+        reloadDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
     @available(*, unavailable)
@@ -223,6 +251,10 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     func windowWillClose(_ notification: Notification) {
         loadTask?.cancel()
         loadTask = nil
+        reloadDebounce?.cancel()
+        reloadDebounce = nil
+        watcher?.stop()
+        watcher = nil
     }
 
     // MARK: - NSSearchFieldDelegate
