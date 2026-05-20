@@ -168,6 +168,43 @@ Run these once after working through 1–20:
 
 ---
 
+## Large-document stress (M3 carry-over)
+
+Run after the main walkthrough. Validates editor responsiveness on
+5 MB+ documents and the `NSTextFinder` find/replace path.
+
+Open the parser-bench fixture in Writ (it's 5 MB of synthesized
+markdown, no math/mermaid):
+
+```sh
+open -a Writ Benchmarks/Fixtures/5mb.md
+```
+
+- [ ] **Open time**: window appears editable within ~1 s of the
+      `open` invocation (subjective; corresponds to the M1 P0 gate).
+- [ ] **Initial scroll**: page-down a few times. No stutter, no
+      half-rendered frames.
+- [ ] **Typing**: place caret near the end of the document, type a
+      few characters. No visible lag.
+- [ ] **Find (⌘F)**: type a common word (`the` is fine). Match
+      count updates without freezing the UI. Find-next (⌘G) jumps
+      through results responsively.
+- [ ] **Find with case option**: toggle Match Case in the find bar.
+      Result set updates immediately.
+- [ ] **Replace (⌥⌘F)**: open the Replace interface. Replace one
+      occurrence of a common short string with a slightly longer
+      one. No hang. Replace-all on a unique short string. App stays
+      responsive throughout.
+- [ ] **Outline**: open the outline (⌥⌘0). It populates without
+      visible delay (5 MB has many headings).
+- [ ] **Preview**: switch to Preview Only (⌥⌘2). HTML rendering
+      may take a couple of seconds but the UI does not beachball.
+
+If any step fails, file the section number, the operation, the
+approximate elapsed time, and any spinner / hang behaviour.
+
+---
+
 ## Reporting
 
 If anything fails:
