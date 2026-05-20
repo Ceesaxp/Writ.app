@@ -28,15 +28,20 @@ final class WritTextView: NSTextView {
     // so lines wrap at that fixed width regardless of the actual
     // visible area. Bridge it manually by resizing the container
     // every time the text view's frame width changes.
+    //
+    // NOTE on padding: `NSTextContainer.size.width` is the layout width
+    // INCLUDING the per-side `lineFragmentPadding`. The glyph layout
+    // area inside is automatically reduced by the padding. So the
+    // container width should equal the view width, not the view width
+    // minus the padding.
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         guard let container = textContainer else { return }
-        // Subtract both edges' line-fragment padding so the wrap point
-        // matches the visible text column, not the container edge.
-        let padding = container.lineFragmentPadding * 2
-        let width = max(0, newSize.width - padding)
-        if container.size.width != width {
-            container.size = NSSize(width: width, height: container.size.height)
+        if container.size.width != newSize.width {
+            container.size = NSSize(width: newSize.width, height: container.size.height)
+            // TextKit 2's layout manager doesn't invalidate automatically
+            // on container resize; force a re-layout so wrap takes effect.
+            textLayoutManager?.invalidateLayout(for: textLayoutManager!.documentRange)
         }
     }
 

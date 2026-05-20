@@ -123,11 +123,40 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             name: NSView.boundsDidChangeNotification,
             object: scroll.contentView
         )
+        // Force the text view's frame width to track the clip view's
+        // bounds width. Autoresizing-mask-based width tracking via
+        // `.width` + `widthTracksTextView` is unreliable under
+        // TextKit 2 (the document view sometimes ends up wider than
+        // the clip view, producing horizontal overflow). Observe the
+        // clip view's frame and pin the document view manually.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipViewFrameDidChange(_:)),
+            name: NSView.frameDidChangeNotification,
+            object: scroll.contentView
+        )
+    }
+
+    @objc private func clipViewFrameDidChange(_ note: Notification) {
+        let clipWidth = scrollView.contentView.bounds.width
+        guard clipWidth > 0 else { return }
+        var frame = textView.frame
+        // Preserve the textView's height (it tracks document length)
+        // and clamp width to the clip view's bounds.
+        if frame.width != clipWidth {
+            frame.size.width = clipWidth
+            textView.frame = frame
+        }
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
         applyLineNumberPreference()
+        // First-layout sync — the clip view's frame is final by the
+        // time we reach viewWillAppear, but its frameDidChange
+        // notification may have already fired during setup when the
+        // bounds were still the default 200×200.
+        clipViewFrameDidChange(Notification(name: NSView.frameDidChangeNotification))
     }
 
     private var lastScrollRatio: Double = 0
