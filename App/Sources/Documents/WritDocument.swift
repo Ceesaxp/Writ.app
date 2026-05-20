@@ -57,6 +57,20 @@ final class WritDocument: NSDocument {
 
     private func handleExternalChange() {
         guard let url = fileURL, !externalChangePromptActive else { return }
+
+        // Issue #5 from the GitHub tracker / user report: opening a file is
+        // enough to trigger spurious "file changed on disk" alerts because
+        // any access — including the one we just performed reading the
+        // bytes — can fire presentedItemDidChange. Compare the file's
+        // current modification date with what NSDocument loaded; ignore
+        // the notification when the *content* hasn't actually changed.
+        if let onDiskDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+           let loadedDate = fileModificationDate,
+           // Two-second slop because NSDocument's loaded date and the
+           // filesystem mtime sometimes round differently.
+           abs(onDiskDate.timeIntervalSince(loadedDate)) < 2.0 {
+            return
+        }
         // Skip if we have unsaved local edits — we don't want to silently
         // clobber the user's work. The MVP behavior is conservative: prompt
         // and let the user choose.

@@ -34,6 +34,17 @@ enum AppMenu {
         let openFolder = NSMenuItem(title: "Open Folder…", action: #selector(AppDelegate.openFolder(_:)), keyEquivalent: "O")
         openFolder.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(openFolder)
+        // AppKit auto-populates any submenu whose parent item title is
+        // exactly "Open Recent" with NSDocumentController.recentDocumentURLs
+        // and routes selection through openDocument(_:). The Clear Menu
+        // item is required for AppKit to recognise this as the recents
+        // submenu.
+        let openRecentItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        let openRecentMenu = NSMenu(title: "Open Recent")
+        let clearRecent = NSMenuItem(title: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
+        openRecentMenu.addItem(clearRecent)
+        openRecentItem.submenu = openRecentMenu
+        fileMenu.addItem(openRecentItem)
         fileMenu.addItem(.separator())
         fileMenu.addItem(NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
         fileMenu.addItem(NSMenuItem(title: "Save", action: #selector(NSDocument.save(_:)), keyEquivalent: "s"))

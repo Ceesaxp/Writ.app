@@ -26,12 +26,19 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         self.splitController = NSSplitViewController()
 
         let split = splitController.splitView
-        split.dividerStyle = .thin
+        // .paneSplitter is the chunky-with-handle style; gives users a
+        // clear visible target to grab instead of the 1-pt .thin divider.
+        split.dividerStyle = .paneSplitter
         split.isVertical = true
+        split.autosaveName = "WritEditorPreviewSplit"
 
         let editorItem = NSSplitViewItem(viewController: editor)
         editorItem.minimumThickness = 280
-        editorItem.holdingPriority = .defaultLow + 1
+        // Equal holding priorities → the split resizes both sides
+        // proportionally as the window grows / shrinks. The earlier
+        // imbalanced setup caused the editor to compress before the
+        // preview when window state was restored from autosave.
+        editorItem.holdingPriority = .defaultLow
 
         let previewItem = NSSplitViewItem(viewController: preview)
         previewItem.minimumThickness = 280
@@ -90,6 +97,29 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
         window.makeFirstResponder(editor.textView)
         window.setFrameAutosaveName("WritMainWindow")
+
+        // When a real document opens, close any leftover empty-untitled
+        // documents that the launch placeholder left behind. Only closes
+        // documents that are still untitled (no fileURL) AND clean
+        // (no edits) so we never lose user work.
+        if document.fileURL != nil {
+            DispatchQueue.main.async {
+                Self.closeEmptyUntitledDocuments(except: document)
+            }
+        }
+    }
+
+    /// Closes every other open document that is still untitled and has no
+    /// unsaved edits. Called whenever a saved-on-disk document opens so
+    /// the launch placeholder doesn't linger.
+    @MainActor
+    static func closeEmptyUntitledDocuments(except keeper: NSDocument) {
+        for doc in NSDocumentController.shared.documents {
+            guard doc !== keeper else { continue }
+            if doc.fileURL == nil && !doc.isDocumentEdited {
+                doc.close()
+            }
+        }
     }
 
     @available(*, unavailable)
@@ -107,6 +137,26 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     override func windowDidLoad() {
         super.windowDidLoad()
         applyLoadedSource()
+    }
+
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        // Force a balanced initial split. If the user later drags the
+        // divider, NSSplitView's autosave records it; we only intervene
+        // when the current ratio looks like a default-imbalanced layout
+        // (editor < 35% of the editing area).
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.splitController.splitView.layoutSubtreeIfNeeded()
+            let split = self.splitController.splitView
+            let total = split.bounds.width - split.dividerThickness
+            guard total > 0 else { return }
+            let editorWidth = self.splitController.splitViewItems[0].viewController.view.bounds.width
+            let ratio = editorWidth / total
+            if ratio < 0.35 || ratio > 0.65 {
+                split.setPosition(total * 0.5, ofDividerAt: 0)
+            }
+        }
     }
 
     func applyLoadedSource() {
