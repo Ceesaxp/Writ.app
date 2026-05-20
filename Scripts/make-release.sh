@@ -27,7 +27,7 @@ done
 # Regenerate Xcode project so any project.yml edits land in the archive.
 xcodegen generate >/dev/null
 
-# Archive
+# Archive — Release config in project.yml drives signing style + identity.
 echo "==> Building Release archive..."
 rm -rf build/Writ.xcarchive
 xcodebuild \
@@ -36,9 +36,6 @@ xcodebuild \
   -configuration Release \
   -destination 'platform=macOS' \
   -archivePath build/Writ.xcarchive \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="Developer ID Application" \
-  DEVELOPMENT_TEAM=Q34D9AYJ95 \
   archive | tail -5
 
 # Export Developer-ID-signed .app

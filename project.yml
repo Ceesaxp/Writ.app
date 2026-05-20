@@ -23,8 +23,10 @@ settings:
       CODE_SIGNING_REQUIRED: NO
       CODE_SIGNING_ALLOWED: NO
     Release:
+      # Aligned with Gridka — Automatic style lets the toolchain pick the
+      # matching Developer ID certificate based on DEVELOPMENT_TEAM, so
+      # cert renewals don't break the build.
       CODE_SIGN_STYLE: Automatic
-      CODE_SIGN_IDENTITY: "Developer ID Application"
 packages:
   WritCore:
     path: Packages/WritCore
