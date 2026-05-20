@@ -23,6 +23,9 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     private let searchField = NSSearchField()
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
+    /// Off-main enumeration task. Cancelled when the window closes so
+    /// large or network-backed folders don't keep walking the tree.
+    private var loadTask: Task<Void, Never>?
 
     init(folder: URL) {
         self.folder = folder
@@ -89,22 +92,63 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     }
 
     private func loadFiles() {
-        let exts: Set<String> = ["md", "markdown", "mdown", "txt"]
-        var found: [URL] = []
-        if let enumerator = FileManager.default.enumerator(
-            at: folder,
-            includingPropertiesForKeys: [.isRegularFileKey, .nameKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) {
-            for case let url as URL in enumerator {
+        loadTask?.cancel()
+        let folder = self.folder
+        // Enumeration runs off-main so large or network-backed folders
+        // don't freeze the window. Results are streamed back in batches
+        // for snappy first paint; cancellation is honoured between
+        // batches and between individual entries.
+        loadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let exts: Set<String> = ["md", "markdown", "mdown", "txt"]
+            var batch: [URL] = []
+            var accumulated: [URL] = []
+            guard let enumerator = FileManager.default.enumerator(
+                at: folder,
+                includingPropertiesForKeys: [.isRegularFileKey, .nameKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                await self?.handleLoadResult([])
+                return
+            }
+            // Manual iteration: NSEnumerator's for-in adapter is
+            // unavailable from async contexts under Swift 6 strict
+            // concurrency. `nextObject()` is the supported path.
+            while true {
+                if Task.isCancelled { return }
+                guard let next = enumerator.nextObject() else { break }
+                guard let url = next as? URL else { continue }
                 guard let isRegular = try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile,
                       isRegular else { continue }
                 if exts.contains(url.pathExtension.lowercased()) {
-                    found.append(url)
+                    batch.append(url)
+                    accumulated.append(url)
+                    if batch.count >= 200 {
+                        let toFlush = batch
+                        batch.removeAll(keepingCapacity: true)
+                        await self?.appendDiscoveredFiles(toFlush)
+                    }
                 }
             }
+            if Task.isCancelled { return }
+            if !batch.isEmpty {
+                await self?.appendDiscoveredFiles(batch)
+            }
+            await self?.handleLoadResult(accumulated.sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending })
         }
-        allFiles = found.sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
+    }
+
+    /// Streamed batch from the off-main enumerator. Keeps the list
+    /// unsorted between batches so the user sees results immediately;
+    /// `handleLoadResult` does a final sort at the end.
+    private func appendDiscoveredFiles(_ batch: [URL]) {
+        allFiles.append(contentsOf: batch)
+        applyFilter()
+    }
+
+    /// Final settle: replace with the sorted view so the list isn't
+    /// stuck in enumeration order.
+    private func handleLoadResult(_ sorted: [URL]) {
+        allFiles = sorted
         applyFilter()
     }
 
@@ -174,6 +218,11 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSTabl
                 alert.runModal()
             }
         }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        loadTask?.cancel()
+        loadTask = nil
     }
 
     // MARK: - NSSearchFieldDelegate

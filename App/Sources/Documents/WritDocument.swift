@@ -38,6 +38,34 @@ final class WritDocument: NSDocument {
         addWindowController(controller)
     }
 
+    // Save / Save As / Save A Copy / autosave-in-place can all change the
+    // document's location after a window has already wired itself up to
+    // the original directory. Without re-broadcasting the new directory,
+    // relative images and the writ-doc:// scheme handler keep pointing
+    // at the old location (or nil, for previously-untitled docs) and
+    // silently fail.
+    override var fileURL: URL? {
+        get { super.fileURL }
+        set {
+            super.fileURL = newValue
+            // The setter is nonisolated in NSDocument; hop to main so
+            // touching the bridge and window controllers stays
+            // actor-clean under Swift 6.
+            let directory = newValue?.deletingLastPathComponent()
+            Task { @MainActor [weak self] in
+                self?.applyDocumentDirectory(directory)
+            }
+        }
+    }
+
+    @MainActor
+    private func applyDocumentDirectory(_ directory: URL?) {
+        bridge.documentDirectory = directory
+        for case let controller as DocumentWindowController in windowControllers {
+            controller.preview.documentDirectory = directory
+        }
+    }
+
     // MARK: - External file change detection (M3)
 
     /// `NSDocument` already implements `NSFilePresenter` and registers with

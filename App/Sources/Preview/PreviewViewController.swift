@@ -396,23 +396,50 @@ final class PreviewNavigationHelper: NSObject, WKNavigationDelegate {
             return
         }
 
-        // Link clicks: route HTTP(S) / mailto / etc. out to the default
-        // handler so the preview pane never navigates away from the shell.
-        if action.navigationType == .linkActivated {
-            NSWorkspace.shared.open(url)
-            decisionHandler(.cancel)
-            return
-        }
-
-        // Anything else that isn't a file: URL also goes external — defends
-        // against form submits, redirects, etc.
-        if !url.isFileURL {
-            NSWorkspace.shared.open(url)
+        // Link clicks and any other non-file navigation: only hand off
+        // schemes we know are safe. A markdown document is untrusted
+        // content and can carry arbitrary `app-name://` URLs that would
+        // otherwise launch third-party handlers without user consent.
+        if action.navigationType == .linkActivated || !url.isFileURL {
+            if Self.allowExternalNavigation(to: url, owner: owner) {
+                NSWorkspace.shared.open(url)
+            } else {
+                previewLog.notice("blocking unexpected external scheme: \(url.scheme ?? "(none)", privacy: .public)")
+            }
             decisionHandler(.cancel)
             return
         }
 
         decisionHandler(.allow)
+    }
+
+    /// Whitelist of schemes the preview is allowed to hand off to the OS.
+    /// `file:` is gated behind a confirmation alert because it can target
+    /// any path the sandbox grants access to.
+    private static func allowExternalNavigation(to url: URL, owner: PreviewViewController?) -> Bool {
+        switch (url.scheme ?? "").lowercased() {
+        case "http", "https", "mailto":
+            return true
+        case "file":
+            return confirmFileNavigation(to: url, owner: owner)
+        default:
+            return false
+        }
+    }
+
+    private static func confirmFileNavigation(to url: URL, owner: PreviewViewController?) -> Bool {
+        _ = owner // reserved for future sheet-modal attachment
+        let alert = NSAlert()
+        alert.messageText = "Open “\(url.lastPathComponent)”?"
+        alert.informativeText = "This document is asking to open a local file:\n\n\(url.path)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        // The navigation decision handler is synchronous, so we have to
+        // use runModal rather than attaching as a sheet. WKNavigation
+        // ignores the WebView while the alert is up — which is the
+        // intended behaviour.
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

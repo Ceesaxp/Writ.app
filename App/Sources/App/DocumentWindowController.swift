@@ -150,21 +150,39 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
-        // Force a balanced initial split. If the user later drags the
-        // divider, NSSplitView's autosave records it; we only intervene
-        // when the current ratio looks like a default-imbalanced layout
-        // (editor < 35% of the editing area).
+        // Force a balanced initial editor/preview split. If the user
+        // later drags the divider, NSSplitView's autosave records it;
+        // we only intervene when the current ratio looks like a
+        // default-imbalanced layout (editor < 35% of the editing area).
+        //
+        // Indices after the outline sidebar was prepended:
+        //   0 = outline (sidebar, often collapsed)
+        //   1 = editor
+        //   2 = preview
+        // Divider 0 sits between outline/editor; divider 1 sits between
+        // editor/preview. We want to balance editor↔preview, so probe
+        // item 1's width against (editor + preview) width and move
+        // divider 1.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.splitController.splitView.layoutSubtreeIfNeeded()
             let split = self.splitController.splitView
-            let total = split.bounds.width - split.dividerThickness
-            guard total > 0 else { return }
-            let editorWidth = self.splitController.splitViewItems[0].viewController.view.bounds.width
-            let ratio = editorWidth / total
+            let editorItem = self.splitController.splitViewItems[1]
+            let previewItem = self.splitController.splitViewItems[2]
+            let editorWidth = editorItem.viewController.view.bounds.width
+            let previewWidth = previewItem.viewController.view.bounds.width
+            let editingAreaWidth = editorWidth + previewWidth
+            guard editingAreaWidth > 0 else { return }
+            let ratio = editorWidth / editingAreaWidth
             if ratio < 0.35 || ratio > 0.65 {
-                split.setPosition(total * 0.5, ofDividerAt: 0)
+                // Divider 1's position is measured from the split view's
+                // leading edge, so we anchor at the outline's trailing
+                // edge plus half the editing area.
+                let outlineWidth = self.splitController.splitViewItems[0].viewController.view.bounds.width
+                let dividerOffset = outlineWidth + editingAreaWidth * 0.5
+                split.setPosition(dividerOffset, ofDividerAt: 1)
             }
+            _ = split // silence unused if the early-return path is taken
         }
     }
 

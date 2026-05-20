@@ -50,9 +50,17 @@ final class WritDocSchemeHandler: NSObject, WKURLSchemeHandler {
 
         // Path-traversal guard: ensure the resolved path is still inside
         // baseDirectory after standardising the URL (eliminates `..` escapes).
+        //
+        // Plain `hasPrefix` is unsafe — base `/Users/a/doc` would falsely
+        // accept `/Users/a/doc-private/file.svg`. Require either an exact
+        // match or a base + separator prefix so sibling directories that
+        // share a name prefix cannot be served.
         let baseStandard = baseDirectory.standardizedFileURL
-        guard candidate.path.hasPrefix(baseStandard.path) else {
-            schemeLog.error("rejecting traversal: \(candidate.path, privacy: .public) escapes \(baseStandard.path, privacy: .public)")
+        let basePath = baseStandard.path
+        let candPath = candidate.path
+        let inside = candPath == basePath || candPath.hasPrefix(basePath + "/")
+        guard inside else {
+            schemeLog.error("rejecting traversal: \(candPath, privacy: .public) escapes \(basePath, privacy: .public)")
             urlSchemeTask.didFailWithError(URLError(.noPermissionsToReadFile))
             return
         }
