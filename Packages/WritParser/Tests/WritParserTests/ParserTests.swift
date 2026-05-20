@@ -174,6 +174,62 @@ struct ParserTests {
         #expect(cleaned == input)
     }
 
+    @Test("HTMLSanitizer strips dangerous SVG nesting")
+    func sanitizerSVGNesting() {
+        let svg = """
+        <svg width="100" height="100">
+          <rect x="0" y="0" width="100" height="100" fill="blue"/>
+          <foreignObject width="100" height="100">
+            <body><script>alert('xss')</script></body>
+          </foreignObject>
+          <animate attributeName="onload" to="alert('xss')"/>
+          <use xlink:href="javascript:bad()"/>
+        </svg>
+        """
+        let cleaned = HTMLSanitizer.sanitize(svg)
+        #expect(!cleaned.lowercased().contains("foreignobject"))
+        #expect(!cleaned.lowercased().contains("<animate"))
+        #expect(!cleaned.lowercased().contains("<use"))
+        #expect(!cleaned.lowercased().contains("javascript:"))
+        // The benign rect inside the SVG survives.
+        #expect(cleaned.contains("<rect"))
+    }
+
+    @Test("HTMLSanitizer keeps safe SVG primitives")
+    func sanitizerSafeSVG() {
+        let svg = """
+        <svg viewBox="0 0 100 100">
+          <rect x="0" y="0" width="50" height="50" fill="red"/>
+          <circle cx="50" cy="50" r="20"/>
+          <path d="M0 0 L100 100"/>
+          <text x="10" y="20">Label</text>
+        </svg>
+        """
+        let cleaned = HTMLSanitizer.sanitize(svg)
+        #expect(cleaned.contains("<rect"))
+        #expect(cleaned.contains("<circle"))
+        #expect(cleaned.contains("<path"))
+        #expect(cleaned.contains("<text"))
+    }
+
+    @Test("HTMLSanitizer rewrites javascript: in xlink:href")
+    func sanitizerXlinkHref() {
+        let input = "<svg><a xlink:href=\"javascript:bad()\">x</a></svg>"
+        let cleaned = HTMLSanitizer.sanitize(input)
+        #expect(!cleaned.contains("javascript:"))
+    }
+
+    @Test("HTMLSanitizer rewrites data:text/html in href, keeps data: in img src")
+    func sanitizerDataURLs() {
+        let bad = "<a href=\"data:text/html,<script>x</script>\">click</a>"
+        let cleaned = HTMLSanitizer.sanitize(bad)
+        #expect(!cleaned.contains("data:text/html"))
+
+        let goodImg = "<img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"x\">"
+        let cleanedImg = HTMLSanitizer.sanitize(goodImg)
+        #expect(cleanedImg.contains("data:image/png"), "data: image URLs must still pass through")
+    }
+
     @Test("Span extractor recognises list/task markers and tables")
     func spansLineLevel() {
         let src = """

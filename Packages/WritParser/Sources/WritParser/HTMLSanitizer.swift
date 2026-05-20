@@ -21,7 +21,16 @@ public enum HTMLSanitizer {
     private static let dangerousTags = [
         "script", "style", "iframe", "object", "embed", "applet",
         "form", "input", "button", "textarea", "select", "option",
-        "meta", "link", "base"
+        "meta", "link", "base",
+        // SVG-specific vectors. `foreignObject` can host arbitrary
+        // HTML+JS inside an otherwise-safe-looking <svg>. Handler
+        // elements (set/animate/animateTransform) can drive script
+        // execution via SMIL when given an `attributeName="onload"`
+        // and `to="..."` pair — strip those entirely. `use` and
+        // `image` can pull in remote/javascript resources; we drop
+        // them to be safe rather than trying to argue with hrefs.
+        "foreignobject", "animate", "animatetransform", "animatemotion",
+        "set", "use", "image", "feimage"
     ]
 
     public static func sanitize(_ html: String) -> String {
@@ -49,14 +58,30 @@ public enum HTMLSanitizer {
             with: "",
             options: .regularExpression
         )
-        // Strip javascript: URLs from href / src.
+        // Strip javascript: / vbscript: URLs from href / src / xlink:href.
+        // The xlink form is SVG's legacy resource pointer; modern SVG
+        // uses plain `href`, but both ship in the wild.
         result = result.replacingOccurrences(
-            of: #"(?i)(href|src)\s*=\s*"\s*javascript:[^"]*""#,
+            of: #"(?i)(xlink:href|href|src)\s*=\s*"\s*(javascript|vbscript):[^"]*""#,
             with: "$1=\"#\"",
             options: .regularExpression
         )
         result = result.replacingOccurrences(
-            of: #"(?i)(href|src)\s*=\s*'\s*javascript:[^']*'"#,
+            of: #"(?i)(xlink:href|href|src)\s*=\s*'\s*(javascript|vbscript):[^']*'"#,
+            with: "$1='#'",
+            options: .regularExpression
+        )
+        // Strip `data:` from href / xlink:href specifically — it can
+        // carry text/html with embedded JS in an <a href> context.
+        // Note: data: stays allowed in `<img src=>` and similar
+        // resource-only sinks since those don't execute markup.
+        result = result.replacingOccurrences(
+            of: #"(?i)(xlink:href|href)\s*=\s*"\s*data:[^"]*""#,
+            with: "$1=\"#\"",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"(?i)(xlink:href|href)\s*=\s*'\s*data:[^']*'"#,
             with: "$1='#'",
             options: .regularExpression
         )
