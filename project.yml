@@ -108,8 +108,3 @@ targets:
         ENABLE_PREVIEWS: YES
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: App/Info.plist
-    scheme:
-      testTargets: []
-      gatherCoverageData: false
-      commandLineArguments: {}
-      environmentVariables: []
