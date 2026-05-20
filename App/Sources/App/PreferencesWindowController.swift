@@ -15,11 +15,12 @@ final class PreferencesWindowController: NSWindowController {
     private let debounceNormalField = NSTextField()
     private let debounceLargeField = NSTextField()
     private let lineNumbersCheckbox = NSButton(checkboxWithTitle: "Show line numbers", target: nil, action: nil)
+    private let tocCheckbox = NSButton(checkboxWithTitle: "Include table of contents in HTML / PDF export", target: nil, action: nil)
     private let fontPopup = NSPopUpButton()
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 330),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 370),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -63,6 +64,10 @@ final class PreferencesWindowController: NSWindowController {
         lineNumbersCheckbox.target = self
         lineNumbersCheckbox.action = #selector(lineNumbersToggled(_:))
 
+        tocCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        tocCheckbox.target = self
+        tocCheckbox.action = #selector(tocToggled(_:))
+
         let fontLabel = NSTextField(labelWithString: "Editor font:")
         fontLabel.translatesAutoresizingMaskIntoConstraints = false
         fontLabel.font = NSFont.systemFont(ofSize: 13)
@@ -91,6 +96,7 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(largeLabel)
         contentView.addSubview(debounceLargeField)
         contentView.addSubview(lineNumbersCheckbox)
+        contentView.addSubview(tocCheckbox)
         contentView.addSubview(fontLabel)
         contentView.addSubview(fontPopup)
         contentView.addSubview(resetButton)
@@ -136,7 +142,10 @@ final class PreferencesWindowController: NSWindowController {
             lineNumbersCheckbox.topAnchor.constraint(equalTo: largeLabel.bottomAnchor, constant: 16),
             lineNumbersCheckbox.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
 
-            fontLabel.topAnchor.constraint(equalTo: lineNumbersCheckbox.bottomAnchor, constant: 16),
+            tocCheckbox.topAnchor.constraint(equalTo: lineNumbersCheckbox.bottomAnchor, constant: 6),
+            tocCheckbox.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+
+            fontLabel.topAnchor.constraint(equalTo: tocCheckbox.bottomAnchor, constant: 16),
             fontLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
             fontLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
 
@@ -157,6 +166,7 @@ final class PreferencesWindowController: NSWindowController {
         debounceNormalField.integerValue = Int(thresholds.debounceNormal.milliseconds)
         debounceLargeField.integerValue = Int(thresholds.debounceLarge.milliseconds)
         lineNumbersCheckbox.state = EditorViewController.lineNumbersEnabled ? .on : .off
+        tocCheckbox.state = ExportService.includeTOC ? .on : .off
         // Select the persisted font family if it's still in the menu,
         // otherwise fall back to "System Monospace".
         let current = EditorViewController.selectedFontFamily
@@ -184,10 +194,15 @@ final class PreferencesWindowController: NSWindowController {
         EditorViewController.lineNumbersEnabled = (sender.state == .on)
     }
 
+    @objc private func tocToggled(_ sender: NSButton) {
+        ExportService.includeTOC = (sender.state == .on)
+    }
+
     @objc private func restoreDefaults(_ sender: Any?) {
         LargeDocumentMode.Thresholds.default.persist()
         EditorViewController.lineNumbersEnabled = true
         EditorViewController.selectedFontFamily = nil
+        ExportService.includeTOC = false
         loadFromDefaults()
     }
 }

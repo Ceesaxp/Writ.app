@@ -217,6 +217,7 @@ final class WritDocument: NSDocument {
             ExportService.exportHTML(
                 preview: controller.preview,
                 parsed: self.bridge.currentParsedDocument,
+                source: self.sourceText,
                 theme: self.bridge.theme,
                 to: url
             )
@@ -229,7 +230,8 @@ final class WritDocument: NSDocument {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType.pdf]
         panel.nameFieldStringValue = (displayName as NSString?)?.deletingPathExtension ?? "export"
-        panel.beginSheetModal(for: window) { response in
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
             guard response == .OK, let url = panel.url else { return }
             controller.statusBar.setExportStatus("Exporting PDF…")
             controller.preview.onExportFinished = { [weak controller] finishedURL, ok in
@@ -239,9 +241,23 @@ final class WritDocument: NSDocument {
                 } else {
                     controller.statusBar.setExportStatus("PDF export failed")
                 }
-                // Clear the status message after a few seconds.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak controller] in
                     controller?.statusBar.setExportStatus(nil)
+                }
+            }
+            // Optional TOC: inject into the live preview DOM, capture
+            // the export, then remove. We use a sentinel id so removal
+            // is exact even if the TOC HTML gets rewritten by KaTeX or
+            // sanitisation downstream.
+            if ExportService.includeTOC {
+                let tocHTML = TOCBuilder.render(from: self.sourceText)
+                if !tocHTML.isEmpty {
+                    controller.preview.insertPDFExportTOC(tocHTML) {
+                        controller.preview.exportPDF(to: url) {
+                            controller.preview.removePDFExportTOC()
+                        }
+                    }
+                    return
                 }
             }
             controller.preview.exportPDF(to: url)

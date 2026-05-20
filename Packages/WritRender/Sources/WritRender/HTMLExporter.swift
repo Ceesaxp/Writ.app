@@ -5,12 +5,12 @@ import WritParser
 /// unit-tested without an AppKit harness; the app target wraps this with
 /// disk I/O and Save panel plumbing.
 public enum HTMLExporter {
-    public static func render(parsed: ParsedDocument?, theme: String, css: String) -> String {
+    public static func render(parsed: ParsedDocument?, theme: String, css: String, toc: String = "") -> String {
         let body = parsed?.html ?? "<!-- no rendered document available -->"
-        return render(body: body, theme: theme, css: css)
+        return render(body: body, theme: theme, css: css, toc: toc)
     }
 
-    public static func render(body: String, theme: String, css: String) -> String {
+    public static func render(body: String, theme: String, css: String, toc: String = "") -> String {
         """
         <!DOCTYPE html>
         <html lang="en">
@@ -22,6 +22,7 @@ public enum HTMLExporter {
         </head>
         <body class="writ-export writ-theme-\(theme)">
         <main id="writ-content">
+        \(toc)
         \(body)
         </main>
         </body>

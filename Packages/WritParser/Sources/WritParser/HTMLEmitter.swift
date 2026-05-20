@@ -40,7 +40,14 @@ struct HTMLEmitter: MarkupWalker {
         switch markup {
         case let h as Heading:
             let id = nextBlockID("h")
-            out.append("<h\(h.level) data-writ-id=\"\(id)\"\(lineAttr)>")
+            // Emit an HTML `id` derived from the heading text so the
+            // exported document supports in-page anchor navigation
+            // and TOC builds. Falls back to the block counter when
+            // the slug would be empty (heading was punctuation or
+            // pure markdown).
+            let slug = HeadingSlug.make(h.plainText)
+            let anchor = slug.isEmpty ? id : "h-\(slug)"
+            out.append("<h\(h.level) id=\"\(anchor)\" data-writ-id=\"\(id)\"\(lineAttr)>")
             emitInlines(h.children)
             out.append("</h\(h.level)>\n")
         case let p as Paragraph:

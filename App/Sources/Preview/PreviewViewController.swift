@@ -252,7 +252,53 @@ final class PreviewViewController: NSViewController {
     /// any "Exporting…" indicator.
     var onExportFinished: ((URL, Bool) -> Void)?
 
-    func exportPDF(to url: URL) {
+    /// Inserts an export-only TOC block at the top of `#writ-content`.
+    /// Used by the PDF export flow when the user has enabled TOC in
+    /// Settings; the block carries a sentinel id so `removePDFExportTOC`
+    /// can take it out again after the print operation finishes.
+    func insertPDFExportTOC(_ tocHTML: String, completion: @escaping () -> Void) {
+        // Escape backticks/backslashes for safe embedding in JS template.
+        let escaped = tocHTML
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "`", with: "\\`")
+        let js = """
+            (function(){
+              var root = document.getElementById('writ-content');
+              if (!root) return;
+              var holder = document.createElement('div');
+              holder.id = 'writ-export-toc';
+              holder.innerHTML = `\(escaped)`;
+              root.insertBefore(holder, root.firstChild);
+            })()
+            """
+        webView.evaluateJavaScript(js) { _, _ in completion() }
+    }
+
+    func removePDFExportTOC() {
+        let js = """
+            (function(){
+              var el = document.getElementById('writ-export-toc');
+              if (el && el.parentNode) el.parentNode.removeChild(el);
+            })()
+            """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    func exportPDF(to url: URL, then: (() -> Void)? = nil) {
+        let originalOnFinished = onExportFinished
+        if let then {
+            // Chain the user's completion + the TOC-removal hook so
+            // the export call site doesn't have to remember either.
+            onExportFinished = { [weak self] finishedURL, ok in
+                then()
+                originalOnFinished?(finishedURL, ok)
+                self?.onExportFinished = originalOnFinished
+            }
+        }
+        exportPDFImpl(to: url)
+    }
+
+    private func exportPDFImpl(to url: URL) {
         let host = webView
         let target = url
         previewLog.notice("[pdf] entry: target=\(target.path, privacy: .public)")
