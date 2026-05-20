@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120" width="240" height="120">
+  <rect width="240" height="120" fill="#0b1020"/>
+  <rect x="12" y="12" width="216" height="96" rx="10" fill="none" stroke="#7cc4ff" stroke-width="2"/>
+  <circle cx="60" cy="60" r="22" fill="#5dd39e"/>
+  <circle cx="120" cy="60" r="22" fill="#f6c177"/>
+  <circle cx="180" cy="60" r="22" fill="#c4a7e7"/>
+  <text x="120" y="100" font-family="-apple-system, system-ui, sans-serif" font-size="12"
+        fill="#cdd6f4" text-anchor="middle">diagram.svg (referenced asset)</text>
+</svg>

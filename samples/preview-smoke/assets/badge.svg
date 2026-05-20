@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" width="120" height="32">
+  <rect x="0" y="0" width="60" height="32" fill="#374151"/>
+  <rect x="60" y="0" width="60" height="32" fill="#10b981"/>
+  <text x="30" y="20" font-family="-apple-system, system-ui, sans-serif" font-size="12"
+        fill="#f9fafb" text-anchor="middle">writ</text>
+  <text x="90" y="20" font-family="-apple-system, system-ui, sans-serif" font-size="12"
+        fill="#f9fafb" text-anchor="middle">passing</text>
+</svg>
