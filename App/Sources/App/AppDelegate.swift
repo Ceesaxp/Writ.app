@@ -18,34 +18,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CommandLine.arguments.contains("--bench")
     }
 
+    // Single-file open hook. Implemented (instead of openFiles:) so we
+    // don't have to call sender.reply(toOpenOrPrint:) — that reply,
+    // sent synchronously while NSDocumentController.openDocument is
+    // still in-flight, was racing with the WKWebView shell load on
+    // cold launch and leaving the preview pane blank.
+    //
+    // Non-bench: route the file through NSDocumentController and
+    // return true so AppKit considers it handled. Recent-doc
+    // recording happens in WritDocument.read(from:).
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
-        if inBenchMode { return true } // swallow silently
-        return false // let the default document controller handle it
-    }
-
-    func application(_ sender: NSApplication, openFiles filenames: [String]) {
-        if inBenchMode {
-            sender.reply(toOpenOrPrint: .success)
-            return
-        }
-        // Route each through NSDocumentController. The
-        // documented behavior is that `openDocument(withContentsOf:...)`
-        // calls `noteNewRecentDocumentURL` on success, but in practice
-        // the recents store stays empty for our sandboxed app — so we
-        // add the URL explicitly as well. The call is idempotent
-        // against AppKit's own recording.
-        for path in filenames {
-            let url = URL(fileURLWithPath: path)
-            NSDocumentController.shared.openDocument(
-                withContentsOf: url,
-                display: true
-            ) { document, _, error in
-                if error == nil && document != nil {
-                    NSDocumentController.shared.noteNewRecentDocumentURL(url)
-                }
-            }
-        }
-        sender.reply(toOpenOrPrint: .success)
+        if inBenchMode { return true } // swallow bench args silently
+        let url = URL(fileURLWithPath: filename)
+        NSDocumentController.shared.openDocument(
+            withContentsOf: url,
+            display: true
+        ) { _, _, _ in }
+        return true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
