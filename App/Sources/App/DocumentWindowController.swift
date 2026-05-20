@@ -9,8 +9,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     let editor: EditorViewController
     let preview: PreviewViewController
     let statusBar: StatusBarViewController
+    let outline: OutlineSidebarController
     private let splitController: NSSplitViewController
     private let containerController: NSViewController
+    private var outlineSplitItem: NSSplitViewItem!
     private(set) var layoutMode: LayoutMode = .split
 
     private let toolbarIdentifier = NSToolbar.Identifier("WritToolbar")
@@ -23,27 +25,31 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         self.editor = EditorViewController()
         self.preview = PreviewViewController()
         self.statusBar = StatusBarViewController()
+        self.outline = OutlineSidebarController()
         self.splitController = NSSplitViewController()
 
         let split = splitController.splitView
-        // .paneSplitter is the chunky-with-handle style; gives users a
-        // clear visible target to grab instead of the 1-pt .thin divider.
         split.dividerStyle = .paneSplitter
         split.isVertical = true
         split.autosaveName = "WritEditorPreviewSplit"
 
+        let outlineItem = NSSplitViewItem(sidebarWithViewController: outline)
+        outlineItem.minimumThickness = 180
+        outlineItem.maximumThickness = 360
+        outlineItem.canCollapse = true
+        outlineItem.collapseBehavior = .preferResizingSplitViewWithFixedSiblings
+        outlineItem.isCollapsed = true // start hidden — toggle via View menu
+        outlineSplitItem = outlineItem
+
         let editorItem = NSSplitViewItem(viewController: editor)
         editorItem.minimumThickness = 280
-        // Equal holding priorities → the split resizes both sides
-        // proportionally as the window grows / shrinks. The earlier
-        // imbalanced setup caused the editor to compress before the
-        // preview when window state was restored from autosave.
         editorItem.holdingPriority = .defaultLow
 
         let previewItem = NSSplitViewItem(viewController: preview)
         previewItem.minimumThickness = 280
         previewItem.holdingPriority = .defaultLow
 
+        splitController.addSplitViewItem(outlineItem)
         splitController.addSplitViewItem(editorItem)
         splitController.addSplitViewItem(previewItem)
 
@@ -94,6 +100,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         document.bridge.documentDirectory = docDir
         preview.onPreviewScrolled = { [weak self] line in
             self?.editor.scrollToSourceLine(line)
+        }
+        outline.onSelectHeading = { [weak self] heading in
+            self?.editor.scrollToSourceLine(heading.line)
         }
         window.makeFirstResponder(editor.textView)
         window.setFrameAutosaveName("WritMainWindow")
@@ -168,6 +177,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             wordCount: DocumentSnapshot.wordCount(in: doc.sourceText),
             status: .idle
         )
+        outline.update(with: doc.sourceText)
         doc.bridge.scheduleUpdate(source: doc.sourceText)
     }
 
@@ -237,6 +247,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         editor.toggleLineNumbers()
     }
 
+    @objc func toggleOutline(_ sender: Any?) {
+        outlineSplitItem.animator().isCollapsed.toggle()
+    }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(toggleLineNumbers(_:)) {
             item.state = EditorViewController.lineNumbersEnabled ? .on : .off
@@ -274,11 +288,13 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 extension DocumentWindowController: @MainActor EditorViewControllerDelegate {
     func editor(_ controller: EditorViewController, didChangeText newText: String) {
         writDocument?.applyEditorText(newText)
-        // Word count is linear in document size; skip for very large docs where
-        // it would chase typing. Use a coarse 1 MB threshold matching the
-        // large-document mode.
         let words = newText.utf8.count < 1_000_000 ? DocumentSnapshot.wordCount(in: newText) : nil
         statusBar.update(byteCount: newText.utf8.count, lineCount: newText.lineCountWrit, wordCount: words, status: nil)
+        // Only rebuild the outline when it's actually visible — saves a
+        // full AST walk per keystroke on long documents.
+        if !outlineSplitItem.isCollapsed {
+            outline.update(with: newText)
+        }
     }
 
     func editor(_ controller: EditorViewController, didChangeSelectionTo location: (line: Int, column: Int)) {

@@ -122,6 +122,9 @@ enum AppMenu {
         split.keyEquivalentModifierMask = [.command, .option]
         viewMenu.addItem(split)
         viewMenu.addItem(.separator())
+        let outline = NSMenuItem(title: "Show Outline", action: #selector(DocumentWindowController.toggleOutline(_:)), keyEquivalent: "0")
+        outline.keyEquivalentModifierMask = [.command, .option]
+        viewMenu.addItem(outline)
         let lineNumbers = NSMenuItem(title: "Show Line Numbers", action: #selector(DocumentWindowController.toggleLineNumbers(_:)), keyEquivalent: "l")
         lineNumbers.keyEquivalentModifierMask = [.command, .option]
         viewMenu.addItem(lineNumbers)

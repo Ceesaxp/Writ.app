@@ -78,7 +78,6 @@ struct SchedulerTests {
         var completedRevisions: [UInt64] = []
         let iter = scheduler.output.makeAsyncIterator()
         var iter2 = iter
-        // Wait briefly past the debounce.
         try await Task.sleep(for: .milliseconds(200))
         for _ in 0..<10 {
             guard let event = await iter2.next() else { break }
@@ -87,7 +86,7 @@ struct SchedulerTests {
                 break
             }
         }
-        // We expect at most one completion — for the latest revision (5).
         #expect(completedRevisions == [5])
     }
+
 }

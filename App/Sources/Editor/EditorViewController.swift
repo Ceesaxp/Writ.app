@@ -1,5 +1,6 @@
 import Cocoa
 import WritCore
+import WritParser
 
 private extension Comparable {
     func clamped(to limits: ClosedRange<Self>) -> Self {
@@ -380,35 +381,15 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     // MARK: - Insert helpers (wired from Insert menu)
 
-    func insertCodeBlock() {
-        insertBlockTemplate(prefix: "```\n", placeholder: "code", suffix: "\n```")
-    }
+    func insertCodeBlock() { insertBlock(.code) }
+    func insertMathBlock() { insertBlock(.math) }
+    func insertMermaidBlock() { insertBlock(.mermaid) }
 
-    func insertMathBlock() {
-        insertBlockTemplate(prefix: "$$\n", placeholder: "x^2 + y^2 = z^2", suffix: "\n$$")
-    }
-
-    func insertMermaidBlock() {
-        insertBlockTemplate(prefix: "```mermaid\n", placeholder: "graph TD\n  A --> B", suffix: "\n```")
-    }
-
-    private func insertBlockTemplate(prefix: String, placeholder: String, suffix: String) {
+    private func insertBlock(_ template: BlockTemplate) {
         let selection = textView.selectedRange()
-        let block = "\(prefix)\(placeholder)\(suffix)\n"
-        // Ensure a blank line above and below so the fence is in its own block.
-        let storage = textView.textStorage
-        let needsLeadingBlank: Bool = {
-            guard let storage, selection.location > 0 else { return false }
-            let prevIdx = selection.location - 1
-            let prev = (storage.string as NSString).substring(with: NSRange(location: max(0, prevIdx - 1), length: min(2, prevIdx + 1)))
-            return !prev.hasSuffix("\n\n") && !prev.isEmpty
-        }()
-        let toInsert = (needsLeadingBlank ? "\n" : "") + block
-        textView.insertText(toInsert, replacementRange: selection)
-        // Select the placeholder so the user can immediately type to replace it.
-        let placeholderStart = selection.location + (needsLeadingBlank ? 1 : 0) + (prefix as NSString).length
-        let placeholderRange = NSRange(location: placeholderStart, length: (placeholder as NSString).length)
-        textView.setSelectedRange(placeholderRange)
+        let plan = template.plan(insertingAt: selection.location, in: textView.string)
+        textView.insertText(plan.inserted, replacementRange: selection)
+        textView.setSelectedRange(plan.placeholderRange)
     }
 
     private func scheduleHighlight() {
