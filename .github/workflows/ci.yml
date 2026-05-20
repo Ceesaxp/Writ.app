@@ -23,7 +23,15 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+        # The macos-26 runner image installs multiple Xcode versions
+        # under /Applications. We want the newest 26.x; fall back to
+        # the default symlink if no explicit 26.x path is present.
+        run: |
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          candidate=$(ls -1d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$candidate" ]; then candidate=/Applications/Xcode.app; fi
+          echo "Using $candidate"
+          sudo xcode-select -s "$candidate"
 
       - name: Show toolchain
         run: |
@@ -50,7 +58,15 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+        # The macos-26 runner image installs multiple Xcode versions
+        # under /Applications. We want the newest 26.x; fall back to
+        # the default symlink if no explicit 26.x path is present.
+        run: |
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          candidate=$(ls -1d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$candidate" ]; then candidate=/Applications/Xcode.app; fi
+          echo "Using $candidate"
+          sudo xcode-select -s "$candidate"
 
       - name: Install xcodegen and xcbeautify
         run: brew install xcodegen xcbeautify
