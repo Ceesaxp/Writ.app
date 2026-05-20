@@ -240,10 +240,17 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSTabl
     }
 
     private func openFile(_ url: URL) {
-        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { document, _, error in
             if let error {
                 let alert = NSAlert(error: error)
                 alert.runModal()
+                return
+            }
+            // Explicit recent-doc record — AppKit's auto-record path
+            // isn't firing for our sandboxed app. Idempotent if AppKit
+            // also records.
+            if document != nil {
+                NSDocumentController.shared.noteNewRecentDocumentURL(url)
             }
         }
     }

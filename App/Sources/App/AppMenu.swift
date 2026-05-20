@@ -4,6 +4,11 @@ import Cocoa
 /// app can boot without Interface Builder artifacts.
 @MainActor
 enum AppMenu {
+    /// Retained delegate for the File > Open Recent submenu. Held at
+    /// module scope so the submenu's weak `delegate` reference stays
+    /// valid for the app's lifetime.
+    static let recentDocumentsDelegate = RecentDocumentsMenuDelegate()
+
     static func install() {
         let main = NSMenu()
 
@@ -34,15 +39,15 @@ enum AppMenu {
         let openFolder = NSMenuItem(title: "Open Folder…", action: #selector(AppDelegate.openFolder(_:)), keyEquivalent: "O")
         openFolder.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(openFolder)
-        // AppKit auto-populates any submenu whose parent item title is
-        // exactly "Open Recent" with NSDocumentController.recentDocumentURLs
-        // and routes selection through openDocument(_:). The Clear Menu
-        // item is required for AppKit to recognise this as the recents
-        // submenu.
+        // The File > Open Recent submenu is populated by a dedicated
+        // NSMenuDelegate on each open — AppKit's "auto-detect by title"
+        // mechanism for code-built menus is unreliable, so we drive it
+        // ourselves. The delegate reads
+        // `NSDocumentController.shared.recentDocumentURLs` and rebuilds
+        // entries + the Clear Menu trailer each time.
         let openRecentItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
         let openRecentMenu = NSMenu(title: "Open Recent")
-        let clearRecent = NSMenuItem(title: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
-        openRecentMenu.addItem(clearRecent)
+        openRecentMenu.delegate = recentDocumentsDelegate
         openRecentItem.submenu = openRecentMenu
         fileMenu.addItem(openRecentItem)
         fileMenu.addItem(.separator())

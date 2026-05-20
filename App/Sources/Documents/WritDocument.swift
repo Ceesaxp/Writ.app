@@ -150,6 +150,16 @@ final class WritDocument: NSDocument {
     override func read(from url: URL, ofType typeName: String) throws {
         let data = try Data(contentsOf: url)
         try read(from: data, ofType: typeName)
+        // Belt-and-braces: AppKit's documented auto-record of recent
+        // documents inside `NSDocumentController.openDocument(...)`
+        // wasn't actually populating our sandboxed app's recents
+        // store. Record here, on the read path, so every entry point
+        // (menu, Finder drag-drop, folder window, `open` from
+        // terminal) gets the URL into the recents list. The call is
+        // idempotent.
+        DispatchQueue.main.async {
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        }
     }
 
     nonisolated(unsafe) private var loadedEncoding: String.Encoding = .utf8

@@ -28,12 +28,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sender.reply(toOpenOrPrint: .success)
             return
         }
-        // Default behavior: route each through NSDocumentController.
+        // Route each through NSDocumentController. The
+        // documented behavior is that `openDocument(withContentsOf:...)`
+        // calls `noteNewRecentDocumentURL` on success, but in practice
+        // the recents store stays empty for our sandboxed app — so we
+        // add the URL explicitly as well. The call is idempotent
+        // against AppKit's own recording.
         for path in filenames {
+            let url = URL(fileURLWithPath: path)
             NSDocumentController.shared.openDocument(
-                withContentsOf: URL(fileURLWithPath: path),
+                withContentsOf: url,
                 display: true
-            ) { _, _, _ in }
+            ) { document, _, error in
+                if error == nil && document != nil {
+                    NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                }
+            }
         }
         sender.reply(toOpenOrPrint: .success)
     }
