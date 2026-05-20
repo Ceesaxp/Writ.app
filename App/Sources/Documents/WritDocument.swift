@@ -1,8 +1,11 @@
 import Cocoa
 import UniformTypeIdentifiers
+import os
 import WritCore
 import WritParser
 import WritRender
+
+private let docLog = Logger(subsystem: "org.ceesaxp.Writ", category: "document")
 
 /// Document-based macOS document for plain-text Markdown.
 ///
@@ -34,6 +37,7 @@ final class WritDocument: NSDocument {
     override class var autosavesDrafts: Bool { true }
 
     override func makeWindowControllers() {
+        docLog.notice("makeWindowControllers")
         let controller = DocumentWindowController(document: self)
         addWindowController(controller)
     }
@@ -148,15 +152,11 @@ final class WritDocument: NSDocument {
     // MARK: - File IO
 
     override func read(from url: URL, ofType typeName: String) throws {
+        docLog.notice("read(from url:) start path=\(url.path, privacy: .public)")
         let data = try Data(contentsOf: url)
+        docLog.notice("read(from url:) bytes=\(data.count)")
         try read(from: data, ofType: typeName)
-        // Belt-and-braces: AppKit's documented auto-record of recent
-        // documents inside `NSDocumentController.openDocument(...)`
-        // wasn't actually populating our sandboxed app's recents
-        // store. Record here, on the read path, so every entry point
-        // (menu, Finder drag-drop, folder window, `open` from
-        // terminal) gets the URL into the recents list. The call is
-        // idempotent.
+        docLog.notice("read(from url:) decoded, sourceText.utf8.count=\(self.sourceText.utf8.count)")
         DispatchQueue.main.async {
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
         }
@@ -172,9 +172,9 @@ final class WritDocument: NSDocument {
         hadBOM = decoded.hadBOM
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.windowControllers
-                .compactMap { $0 as? DocumentWindowController }
-                .forEach { $0.applyLoadedSource() }
+            let controllers = self.windowControllers.compactMap { $0 as? DocumentWindowController }
+            docLog.notice("read.applyLoadedSource dispatch fired, controllers=\(controllers.count)")
+            controllers.forEach { $0.applyLoadedSource() }
         }
     }
 

@@ -82,6 +82,7 @@ final class PreviewViewController: NSViewController {
 
     override func viewWillAppear() {
         super.viewWillAppear()
+        previewLog.notice("viewWillAppear, hasIssuedLoad=\(self.hasIssuedLoad)")
         if !hasIssuedLoad {
             hasIssuedLoad = true
             loadShell()
@@ -103,15 +104,13 @@ final class PreviewViewController: NSViewController {
             previewLog.error("failed to find preview shell in bundle")
             return
         }
-        // The read-access scope must be inside the app's sandbox grant or
-        // WebKit refuses to load even the shell itself. Bundle Resources
-        // covers the shell, vendor JS, and CSS. Document-relative images
-        // need a custom URL scheme handler (deferred — tracked in TODO M2).
         let accessURL = Bundle.main.resourceURL ?? indexURL.deletingLastPathComponent()
+        previewLog.notice("loadShell index=\(indexURL.path, privacy: .public) access=\(accessURL.path, privacy: .public)")
         webView.loadFileURL(indexURL, allowingReadAccessTo: accessURL)
     }
 
     func didFinishNavigationCallback() {
+        previewLog.notice("webView didFinish navigation, isReady=\(self.isReady)")
         // After a reload (Cmd+R, right-click → Reload, etc.) the JS document
         // is reset, so isReady flips back to false and any payload we sent
         // before is gone. Replay it once the shell is back.
@@ -140,6 +139,7 @@ final class PreviewViewController: NSViewController {
     func didReceiveMessage(type: String, body: [String: Any]) {
         switch type {
         case "ready":
+            previewLog.notice("JS ready, pendingPayload=\(self.pendingPayload != nil ? "yes" : "no")")
             isReady = true
             onReady?()
             if let pending = pendingPayload {
@@ -148,6 +148,7 @@ final class PreviewViewController: NSViewController {
             }
         case "rendered":
             if let r = body["revision"] as? UInt64 {
+                previewLog.notice("JS rendered rev=\(r)")
                 lastRenderedRevision = DocumentRevision(r)
                 onRendered?(lastRenderedRevision)
             }
@@ -172,6 +173,7 @@ final class PreviewViewController: NSViewController {
     /// ready — the latest payload is replayed when JS reports ready.
     func apply(_ payload: PreviewBridgePayload) {
         if !isReady {
+            previewLog.notice("apply: not ready yet, stashing pendingPayload rev=\(payload.revision)")
             pendingPayload = payload
             return
         }
@@ -179,9 +181,12 @@ final class PreviewViewController: NSViewController {
             let json = try payload.encodedAsJSON()
             let js = "window.Writ && window.Writ.update(\(json))"
             lastAppliedPayload = payload
+            previewLog.notice("apply: evaluating Writ.update rev=\(payload.revision) json=\(json.utf8.count)B")
             webView.evaluateJavaScript(js) { [weak self] _, error in
                 if let error {
                     previewLog.error("Writ.update failed: \(error.localizedDescription, privacy: .public)")
+                } else {
+                    previewLog.notice("Writ.update evaluated OK rev=\(payload.revision)")
                 }
                 self?.lastRenderedRevision = DocumentRevision(payload.revision)
             }

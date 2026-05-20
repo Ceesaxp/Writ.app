@@ -1,7 +1,10 @@
 import Cocoa
+import os
 import WritCore
 import WritParser
 import WritRender
+
+private let bridgeLog = Logger(subsystem: "org.ceesaxp.Writ", category: "bridge")
 
 /// Connects ``PreviewScheduler`` events to a ``PreviewViewController`` on the
 /// main actor.
@@ -35,6 +38,7 @@ final class PreviewBridge {
     }
 
     func attach(preview: PreviewViewController, statusBar: StatusBarViewController) {
+        bridgeLog.notice("attach(preview:statusBar:)")
         self.preview = preview
         self.statusBar = statusBar
         startPumpIfNeeded()
@@ -49,6 +53,7 @@ final class PreviewBridge {
     }
 
     func scheduleUpdate(source: String) {
+        bridgeLog.notice("scheduleUpdate bytes=\(source.utf8.count)")
         statusBar?.update(byteCount: source.utf8.count, lineCount: nil, status: nil)
         Task { await scheduler.scheduleUpdate(source: source) }
     }
@@ -76,11 +81,18 @@ final class PreviewBridge {
     private func handle(_ event: PreviewScheduler.Event) {
         switch event {
         case .started(let revision):
+            bridgeLog.notice("scheduler.started rev=\(revision.value)")
             statusBar?.update(byteCount: nil, lineCount: nil, status: .rendering(revision: revision))
         case .completed(let parsed):
+            bridgeLog.notice("scheduler.completed rev=\(parsed.revision.value) html=\(parsed.html.utf8.count)B blocks=\(parsed.blocks.count)")
             currentParsedDocument = parsed
             let payload = PreviewBridgePayload(revision: parsed.revision, html: parsed.html, blocks: parsed.blocks, theme: theme, documentBaseURL: documentDirectory?.absoluteString)
-            preview?.apply(payload)
+            if let p = preview {
+                bridgeLog.notice("forwarding payload to preview")
+                p.apply(payload)
+            } else {
+                bridgeLog.error("preview is nil; cannot forward payload")
+            }
             let total = parsed.parseDuration + parsed.renderDuration
             statusBar?.update(byteCount: nil, lineCount: nil, status: .current(revision: parsed.revision, duration: total))
         case .cancelled(let revision):

@@ -1,4 +1,7 @@
 import Cocoa
+import os
+
+private let launchLog = Logger(subsystem: "org.ceesaxp.Writ", category: "launch")
 
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -30,14 +33,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         if inBenchMode { return true } // swallow bench args silently
         let url = URL(fileURLWithPath: filename)
+        launchLog.notice("openFile: \(filename, privacy: .public)")
         NSDocumentController.shared.openDocument(
             withContentsOf: url,
             display: true
-        ) { _, _, _ in }
+        ) { doc, _, error in
+            if let error {
+                launchLog.error("openDocument failed: \(error.localizedDescription, privacy: .public)")
+            } else {
+                launchLog.notice("openDocument completed: \(doc?.fileURL?.path ?? "no fileURL", privacy: .public)")
+            }
+        }
         return true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        launchLog.notice("applicationDidFinishLaunching, bench=\(self.inBenchMode)")
         if inBenchMode {
             BenchmarkMode.run()
             return

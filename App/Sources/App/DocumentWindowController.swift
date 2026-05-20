@@ -1,5 +1,8 @@
 import Cocoa
+import os
 import WritCore
+
+private let dwcLog = Logger(subsystem: "org.ceesaxp.Writ", category: "window")
 
 /// Owns the window, the split-view layout, and the wiring between editor,
 /// preview, and the document. One controller per document window.
@@ -195,7 +198,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     func applyLoadedSource() {
-        guard let doc = writDocument else { return }
+        guard let doc = writDocument else {
+            dwcLog.error("applyLoadedSource: writDocument is nil")
+            return
+        }
+        dwcLog.notice("applyLoadedSource bytes=\(doc.sourceText.utf8.count)")
         editor.setSource(doc.sourceText)
         statusBar.update(
             byteCount: doc.sourceText.utf8.count,
