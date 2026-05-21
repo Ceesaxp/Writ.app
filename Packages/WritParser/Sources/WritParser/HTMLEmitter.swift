@@ -16,18 +16,35 @@ struct HTMLEmitter: MarkupWalker {
     var collectedBlocks: [TechnicalBlock] = []
     private var blockCounter = 0
     private let mathBlocks: [MathPreprocessor.Extracted]
+    private let frontMatter: FrontMatter?
 
-    init(mathBlocks: [MathPreprocessor.Extracted]) {
+    init(mathBlocks: [MathPreprocessor.Extracted], frontMatter: FrontMatter? = nil) {
         self.mathBlocks = mathBlocks
+        self.frontMatter = frontMatter
     }
 
     mutating func visit(_ document: Document) -> String {
         out = ""
         out.reserveCapacity(document.format().count)
+        if let fm = frontMatter, !fm.entries.isEmpty {
+            emitFrontMatter(fm)
+        }
         for child in document.children {
             visitChild(child)
         }
         return out
+    }
+
+    private mutating func emitFrontMatter(_ fm: FrontMatter) {
+        let id = nextBlockID("fm")
+        let formatLabel = fm.format == .yaml ? "YAML" : "TOML"
+        out.append("<dl data-writ-id=\"\(id)\" class=\"writ-front-matter writ-front-matter-\(fm.format == .yaml ? "yaml" : "toml")\">\n")
+        out.append("<dt class=\"writ-front-matter-format\">\(formatLabel) front matter</dt>\n")
+        out.append("<dd>\n<table>\n")
+        for entry in fm.entries {
+            out.append("<tr><th>\(escape(entry.key))</th><td>\(escape(entry.value))</td></tr>\n")
+        }
+        out.append("</table>\n</dd>\n</dl>\n")
     }
 
     private mutating func nextBlockID(_ prefix: String) -> String {
@@ -92,10 +109,19 @@ struct HTMLEmitter: MarkupWalker {
             for item in list.listItems { emitListItem(item) }
             out.append("</ol>\n")
         case let quote as BlockQuote:
-            let id = nextBlockID("bq")
-            out.append("<blockquote data-writ-id=\"\(id)\"\(lineAttr)>\n")
-            for child in quote.children { visitChild(child) }
-            out.append("</blockquote>\n")
+            // GFM-style alert (NOTE / TIP / IMPORTANT / WARNING / CAUTION):
+            // first line of the blockquote reads `[!TYPE]` and the rest
+            // is the alert body. Render as a typed callout instead of
+            // a plain blockquote.
+            if let alert = GFMAlert.detect(in: quote) {
+                let id = nextBlockID("alert")
+                emitAlert(alert, id: id, lineAttr: lineAttr)
+            } else {
+                let id = nextBlockID("bq")
+                out.append("<blockquote data-writ-id=\"\(id)\"\(lineAttr)>\n")
+                for child in quote.children { visitChild(child) }
+                out.append("</blockquote>\n")
+            }
         case is ThematicBreak:
             let id = nextBlockID("hr")
             out.append("<hr data-writ-id=\"\(id)\"\(lineAttr)>\n")
@@ -117,6 +143,21 @@ struct HTMLEmitter: MarkupWalker {
             return " data-writ-line=\"\(line)\""
         }
         return ""
+    }
+
+    private mutating func emitAlert(_ alert: GFMAlert, id: String, lineAttr: String) {
+        let cls = "writ-alert writ-alert-\(alert.kind.rawValue)"
+        out.append("<div data-writ-id=\"\(id)\"\(lineAttr) class=\"\(cls)\">\n")
+        out.append("<div class=\"writ-alert-title\">")
+        out.append(alert.kind.iconSVG)
+        out.append("<span>\(alert.kind.label)</span>")
+        out.append("</div>\n")
+        out.append("<div class=\"writ-alert-body\">\n")
+        // alert.bodyChildren is the BlockQuote's children minus the
+        // marker line; emit them normally so nested markdown still
+        // works inside the alert.
+        for child in alert.bodyChildren { visitChild(child) }
+        out.append("</div>\n</div>\n")
     }
 
     private mutating func emitListItem(_ item: ListItem) {

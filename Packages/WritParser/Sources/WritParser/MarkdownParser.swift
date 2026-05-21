@@ -9,19 +9,25 @@ public struct ParsedDocument: Sendable {
     public let blocks: [TechnicalBlock]
     public let parseDuration: Duration
     public let renderDuration: Duration
+    /// Front-matter key/value pairs extracted from the head of the
+    /// source, if any. Nil when the document has no `---`/`+++` block.
+    /// Callers (HTML export, etc.) read this for `title`, etc.
+    public let frontMatter: FrontMatter?
 
     public init(
         revision: DocumentRevision,
         html: String,
         blocks: [TechnicalBlock],
         parseDuration: Duration,
-        renderDuration: Duration
+        renderDuration: Duration,
+        frontMatter: FrontMatter? = nil
     ) {
         self.revision = revision
         self.html = html
         self.blocks = blocks
         self.parseDuration = parseDuration
         self.renderDuration = renderDuration
+        self.frontMatter = frontMatter
     }
 }
 
@@ -56,13 +62,26 @@ public struct SwiftMarkdownParser: MarkdownParser {
         let parseClock = ContinuousClock()
         let parseStart = parseClock.now
 
-        let (preprocessed, mathBlocks) = MathPreprocessor.extract(snapshot.source)
+        // Strip leading YAML/TOML front matter before any markdown
+        // processing — the body parser shouldn't see `---` lines as
+        // thematic breaks, and the `key: value` lines must not become
+        // setext-y paragraphs.
+        let (frontMatter, bodySource): (FrontMatter?, String)
+        if let extracted = FrontMatterExtractor.extract(snapshot.source) {
+            frontMatter = extracted.0
+            bodySource = extracted.remainder
+        } else {
+            frontMatter = nil
+            bodySource = snapshot.source
+        }
+
+        let (preprocessed, mathBlocks) = MathPreprocessor.extract(bodySource)
         let document = Document(parsing: preprocessed, options: [.parseBlockDirectives])
 
         let parseDuration = parseClock.now - parseStart
 
         let renderStart = parseClock.now
-        var visitor = HTMLEmitter(mathBlocks: mathBlocks)
+        var visitor = HTMLEmitter(mathBlocks: mathBlocks, frontMatter: frontMatter)
         let html = visitor.visit(document)
         let renderDuration = parseClock.now - renderStart
 
@@ -73,7 +92,8 @@ public struct SwiftMarkdownParser: MarkdownParser {
             html: html,
             blocks: blocks,
             parseDuration: parseDuration,
-            renderDuration: renderDuration
+            renderDuration: renderDuration,
+            frontMatter: frontMatter
         )
     }
 }

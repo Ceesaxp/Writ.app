@@ -174,6 +174,136 @@ struct ParserTests {
         #expect(cleaned == input)
     }
 
+    @Test("GFM alert: NOTE blockquote becomes a typed callout")
+    func gfmAlertNote() throws {
+        let src = """
+        > [!NOTE]
+        > Useful information.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        #expect(parsed.html.contains("writ-alert"))
+        #expect(parsed.html.contains("writ-alert-note"))
+        #expect(parsed.html.contains(">Note<"))
+        #expect(parsed.html.contains("Useful information"))
+        // Plain <blockquote> wrapper should NOT also be there.
+        #expect(!parsed.html.contains("<blockquote"))
+    }
+
+    @Test("GFM alert: all five types parse with their tints")
+    func gfmAlertAllTypes() throws {
+        let cases: [(String, String)] = [
+            ("NOTE", "writ-alert-note"),
+            ("TIP", "writ-alert-tip"),
+            ("IMPORTANT", "writ-alert-important"),
+            ("WARNING", "writ-alert-warning"),
+            ("CAUTION", "writ-alert-caution")
+        ]
+        let parser = SwiftMarkdownParser()
+        for (kind, cls) in cases {
+            let src = "> [!\(kind)]\n> body"
+            let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+            #expect(parsed.html.contains(cls), "alert kind \(kind) should produce \(cls)")
+        }
+    }
+
+    @Test("GFM alert: unknown type stays a plain blockquote")
+    func gfmAlertUnknownTypeFallsBack() throws {
+        let src = "> [!FOO]\n> body"
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        #expect(parsed.html.contains("<blockquote"))
+        #expect(!parsed.html.contains("writ-alert"))
+    }
+
+    // MARK: - Front matter
+
+    @Test("YAML front matter is extracted, stripped from body, and emitted as a card")
+    func frontMatterYAML() throws {
+        let src = """
+        ---
+        title: Hello
+        date: 2026-05-21
+        tags: foo, bar
+        ---
+
+        # Body heading
+
+        Paragraph.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let fm = try #require(parsed.frontMatter)
+        #expect(fm.format == .yaml)
+        #expect(fm["title"] == "Hello")
+        #expect(fm["date"] == "2026-05-21")
+        #expect(fm["tags"] == "foo, bar")
+        #expect(parsed.html.contains("writ-front-matter"))
+        // Body heading still renders.
+        #expect(parsed.html.contains("Body heading"))
+        // The `---` delimiters must NOT have been parsed as thematic
+        // breaks in the body.
+        #expect(!parsed.html.contains("<hr"))
+    }
+
+    @Test("TOML front matter is recognised by +++ delimiters")
+    func frontMatterTOML() throws {
+        let src = """
+        +++
+        title = "Hello"
+        author = "Andrei"
+        +++
+
+        Body.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let fm = try #require(parsed.frontMatter)
+        #expect(fm.format == .toml)
+        #expect(fm["title"] == "Hello")
+        #expect(fm["author"] == "Andrei")
+    }
+
+    @Test("Quoted YAML values lose their surrounding quotes")
+    func frontMatterQuoteStripping() throws {
+        let src = """
+        ---
+        title: "Hello, World"
+        slug: 'hello-world'
+        ---
+
+        body
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        #expect(parsed.frontMatter?["title"] == "Hello, World")
+        #expect(parsed.frontMatter?["slug"] == "hello-world")
+    }
+
+    @Test("Document without front matter parses normally")
+    func frontMatterAbsent() throws {
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: "# Just a heading\n"))
+        #expect(parsed.frontMatter == nil)
+        #expect(!parsed.html.contains("writ-front-matter"))
+    }
+
+    @Test("Malformed front matter (no closer) is left as body text")
+    func frontMatterUnclosed() throws {
+        let src = """
+        ---
+        title: never closed
+        body line that's not a closer
+        # heading
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        #expect(parsed.frontMatter == nil)
+        // The leading --- gets treated as a thematic break here, which
+        // is the right CommonMark fallback when there's no closer.
+        #expect(parsed.html.contains("<hr"))
+    }
+
     @Test("HTMLSanitizer strips dangerous SVG nesting")
     func sanitizerSVGNesting() {
         let svg = """

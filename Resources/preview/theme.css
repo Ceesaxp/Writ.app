@@ -86,6 +86,87 @@ blockquote {
 
 hr { border: 0; border-top: 1px solid var(--writ-border); margin: 2em 0; }
 
+/* YAML/TOML front matter block. Renders as a compact metadata card
+   at the top of the preview so the user knows what's there without
+   parsing the markdown source themselves. */
+.writ-front-matter {
+  margin: 0 0 1.5em;
+  padding: 0.6em 0.9em;
+  background: var(--writ-bg-alt);
+  border: 1px solid var(--writ-border);
+  border-radius: 6px;
+  font-size: 0.88em;
+}
+.writ-front-matter-format {
+  font-weight: 600;
+  color: var(--writ-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.78em;
+  margin: 0 0 0.4em;
+}
+.writ-front-matter dd { margin: 0; }
+.writ-front-matter table { width: 100%; border-collapse: collapse; }
+.writ-front-matter th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--writ-fg-muted);
+  padding: 0.15em 0.8em 0.15em 0;
+  vertical-align: top;
+  width: 28%;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+}
+.writ-front-matter td {
+  font-family: var(--writ-mono-font);
+  font-size: 0.92em;
+  color: var(--writ-fg);
+  padding: 0.15em 0;
+  vertical-align: top;
+  border: 0;
+  background: transparent;
+}
+
+/* GFM alerts — `> [!NOTE]` etc. Five types, each with its own colour
+   ramp. The icon inherits `currentColor` so it picks up the type-tint
+   automatically. Body content uses the parent text colour so nested
+   markdown (links, code, etc.) reads normally. */
+.writ-alert {
+  margin: 0 0 1em;
+  padding: 0.7em 1em 0.5em;
+  border-left: 4px solid var(--writ-alert-tint, var(--writ-blockquote-border));
+  background: var(--writ-alert-bg, var(--writ-bg-alt));
+  border-radius: 0 4px 4px 0;
+}
+.writ-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-weight: 600;
+  color: var(--writ-alert-tint, var(--writ-fg));
+  margin: 0 0 0.3em;
+  font-size: 0.95em;
+}
+.writ-alert-icon { flex: 0 0 16px; display: block; }
+.writ-alert-body > :first-child { margin-top: 0; }
+.writ-alert-body > :last-child  { margin-bottom: 0; }
+.writ-alert-body                 { color: var(--writ-fg); }
+
+.writ-alert-note      { --writ-alert-tint: #2563eb; --writ-alert-bg: rgba(37, 99, 235, 0.06); }
+.writ-alert-tip       { --writ-alert-tint: #0d9488; --writ-alert-bg: rgba(13, 148, 136, 0.06); }
+.writ-alert-important { --writ-alert-tint: #7c3aed; --writ-alert-bg: rgba(124, 58, 237, 0.06); }
+.writ-alert-warning   { --writ-alert-tint: #d97706; --writ-alert-bg: rgba(217, 119, 6, 0.07); }
+.writ-alert-caution   { --writ-alert-tint: #dc2626; --writ-alert-bg: rgba(220, 38, 38, 0.06); }
+
+@media (prefers-color-scheme: dark) {
+  .writ-alert-note      { --writ-alert-tint: #60a5fa; --writ-alert-bg: rgba(96, 165, 250, 0.10); }
+  .writ-alert-tip       { --writ-alert-tint: #2dd4bf; --writ-alert-bg: rgba(45, 212, 191, 0.10); }
+  .writ-alert-important { --writ-alert-tint: #a78bfa; --writ-alert-bg: rgba(167, 139, 250, 0.10); }
+  .writ-alert-warning   { --writ-alert-tint: #fbbf24; --writ-alert-bg: rgba(251, 191, 36, 0.10); }
+  .writ-alert-caution   { --writ-alert-tint: #f87171; --writ-alert-bg: rgba(248, 113, 113, 0.10); }
+}
+
 code, pre { font-family: var(--writ-mono-font); font-size: 0.92em; }
 code { background: var(--writ-code-bg); color: var(--writ-code-fg); padding: 0.12em 0.35em; border-radius: 4px; }
 pre {
