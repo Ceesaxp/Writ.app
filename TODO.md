@@ -15,8 +15,8 @@ All exit criteria met. Decisions and baseline numbers in `docs/03-M0-DECISIONS.m
 All P0 gate items met. See git log for details.
 
 Outstanding M1 polish items (non-blocking, circle back as the session permits):
-- [ ] Programmatic `⌘R` manual-refresh regression test (currently exercised manually)
-- [ ] PDF export programmatic smoke test (currently exercised manually)
+- [x] **Programmatic `⌘R` manual-refresh regression test** (commit `216edab`) — two PreviewScheduler tests: forceRefresh bumps revision for unchanged source; forceRefresh cancels pending debounced edits.
+- [x] **PDF export programmatic smoke test** (commit `216edab`) — three HTMLExporter tests: TOC prepended inside content main; every TOC anchor resolves to an HTML id (cross-package slug parity); empty TOC string omits the nav block. Live WKWebView printOperation path remains manual via the smoke checklist.
 - [x] **Strict P0 perf gate measurements** (commit `f62d678`) — docs/04-M1-PERF-GATE.md. 1MB parse p50 192ms, 5MB 953ms, 10KB 2.2ms; all gate criteria PASS with margin.
 - [x] **Undo/redo through `applyEditorText` round-trip** (commit `1076b3c`) — pattern test in WritCoreTests using NSUndoManager + FakeDocument stand-in. App-level test bundle blocked by Xcode 17 + Swift 6 + executable-host swiftmodule conflict; pattern coverage serves as regression lock.
 
