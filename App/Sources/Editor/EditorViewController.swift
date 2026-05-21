@@ -33,7 +33,9 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     private var gutter: LineNumberGutter?
     private var gutterWidthConstraint: NSLayoutConstraint?
     private var scrollLeadingConstraint: NSLayoutConstraint?
-    private var currentSource: String = ""
+    // Internal so EditorFormatting extension (in a sibling file) can
+    // sync after textStorage edits.
+    var currentSource: String = ""
     private var suppressDelegateBroadcast = false
     private let syntaxHighlighter = MarkdownSyntaxHighlighter()
     private var highlightThrottle: Task<Void, Never>?

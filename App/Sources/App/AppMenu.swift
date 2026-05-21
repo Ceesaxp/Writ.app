@@ -112,6 +112,54 @@ enum AppMenu {
         insertMermaid.keyEquivalentModifierMask = [.command, .option]
         insertMenu.addItem(insertMermaid)
 
+        // Format menu — Markdown formatting shortcuts. Actions live on
+        // EditorViewController and are picked up via the responder chain
+        // when the text view is first responder. With nil targets, AppKit
+        // disables the menu items if the editor isn't focused, which is
+        // the behaviour we want.
+        let formatItem = NSMenuItem()
+        main.addItem(formatItem)
+        let formatMenu = NSMenu(title: "Format")
+        formatItem.submenu = formatMenu
+
+        formatMenu.addItem(NSMenuItem(title: "Bold", action: #selector(EditorViewController.formatBold(_:)), keyEquivalent: "b"))
+        formatMenu.addItem(NSMenuItem(title: "Italic", action: #selector(EditorViewController.formatItalic(_:)), keyEquivalent: "i"))
+        formatMenu.addItem(NSMenuItem(title: "Strikethrough", action: #selector(EditorViewController.formatStrikethrough(_:)), keyEquivalent: "u"))
+        formatMenu.addItem(NSMenuItem(title: "Inline Code", action: #selector(EditorViewController.formatInlineCode(_:)), keyEquivalent: "`"))
+        formatMenu.addItem(.separator())
+
+        formatMenu.addItem(NSMenuItem(title: "Link…", action: #selector(EditorViewController.formatLink(_:)), keyEquivalent: "k"))
+        formatMenu.addItem(.separator())
+
+        let headingTitles = ["Heading 1", "Heading 2", "Heading 3", "Heading 4", "Heading 5", "Heading 6"]
+        let headingSelectors: [Selector] = [
+            #selector(EditorViewController.formatHeading1(_:)),
+            #selector(EditorViewController.formatHeading2(_:)),
+            #selector(EditorViewController.formatHeading3(_:)),
+            #selector(EditorViewController.formatHeading4(_:)),
+            #selector(EditorViewController.formatHeading5(_:)),
+            #selector(EditorViewController.formatHeading6(_:))
+        ]
+        for (idx, title) in headingTitles.enumerated() {
+            let item = NSMenuItem(title: title, action: headingSelectors[idx], keyEquivalent: "\(idx + 1)")
+            // Plain ⌘N. View menu uses ⌥⌘1/⌥⌘2/⌥⌘3 for layout, no collision.
+            formatMenu.addItem(item)
+        }
+        formatMenu.addItem(.separator())
+
+        let codeBlock = NSMenuItem(title: "Code Block", action: #selector(EditorViewController.formatFencedCodeBlock(_:)), keyEquivalent: "K")
+        codeBlock.keyEquivalentModifierMask = [.command, .shift]
+        formatMenu.addItem(codeBlock)
+        let orderedList = NSMenuItem(title: "Ordered List", action: #selector(EditorViewController.formatOrderedList(_:)), keyEquivalent: "7")
+        orderedList.keyEquivalentModifierMask = [.command, .shift]
+        formatMenu.addItem(orderedList)
+        let unorderedList = NSMenuItem(title: "Unordered List", action: #selector(EditorViewController.formatUnorderedList(_:)), keyEquivalent: "8")
+        unorderedList.keyEquivalentModifierMask = [.command, .shift]
+        formatMenu.addItem(unorderedList)
+        let blockquote = NSMenuItem(title: "Block Quote", action: #selector(EditorViewController.formatBlockquote(_:)), keyEquivalent: ".")
+        blockquote.keyEquivalentModifierMask = [.command, .shift]
+        formatMenu.addItem(blockquote)
+
         // View menu
         let viewItem = NSMenuItem()
         main.addItem(viewItem)
