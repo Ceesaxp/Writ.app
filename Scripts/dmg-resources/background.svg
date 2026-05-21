@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 540×380 background for the Writ installer DMG. Positions need
+     to match the icon coordinates set by AppleScript in
+     make-release.sh: app icon at (140, 180), Applications symlink
+     at (400, 180), README at (270, 320). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 380" width="540" height="380">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fafafb"/>
+      <stop offset="100%" stop-color="#eceef2"/>
+    </linearGradient>
+    <linearGradient id="banner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Backdrop -->
+  <rect width="540" height="380" fill="url(#bg)"/>
+
+  <!-- Dark banner across the top -->
+  <rect x="0" y="0" width="540" height="60" fill="url(#banner)"/>
+  <text x="270" y="38" font-family="-apple-system, system-ui, sans-serif"
+        font-size="22" font-weight="600" fill="#f8fafc" text-anchor="middle">Writ</text>
+  <text x="270" y="54" font-family="-apple-system, system-ui, sans-serif"
+        font-size="11" fill="#94a3b8" text-anchor="middle">Native macOS Markdown editor</text>
+
+  <!-- Subtle drop-zone indicators behind the two icons. The icons
+       themselves are placed by Finder over these positions. -->
+  <circle cx="140" cy="180" r="60" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 4"/>
+  <circle cx="400" cy="180" r="60" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 4"/>
+
+  <!-- Arrow from Writ.app → Applications -->
+  <g stroke="#64748b" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="210" y1="180" x2="320" y2="180"/>
+    <polyline points="305,168 320,180 305,192"/>
+  </g>
+
+  <!-- Caption below the arrow -->
+  <text x="270" y="260" font-family="-apple-system, system-ui, sans-serif"
+        font-size="12" fill="#475569" text-anchor="middle">Drag Writ to Applications</text>
+
+  <!-- README hint -->
+  <text x="270" y="350" font-family="-apple-system, system-ui, sans-serif"
+        font-size="10" fill="#94a3b8" text-anchor="middle">See README for first-launch notes</text>
+</svg>

@@ -50,16 +50,77 @@ xcodebuild \
 APP=build/Writ-export/Writ.app
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 DMG="build/Writ-${VERSION}.dmg"
+VOLNAME="Writ ${VERSION}"
 echo "==> Building $DMG..."
 
-# Stage the app + Applications symlink, package into a UDZO DMG
+# Stage the contents the user will see when they mount the DMG:
+#   - Writ.app                 (the bundle to drag)
+#   - Applications             (symlink target for the drag gesture)
+#   - README.rtf               (visible, rich-text install notes)
+#   - .background/             (hidden, holds the window background image)
+#   - .DS_Store                (written by Finder after we set the layout)
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
+cp Scripts/dmg-resources/README.rtf "$STAGE/README.rtf"
+mkdir "$STAGE/.background"
+cp Scripts/dmg-resources/background.png "$STAGE/.background/background.png"
 
+# Build a writable DMG first so we can mount it and have Finder
+# stamp the window layout (background image, icon positions, window
+# size) into a .DS_Store. The final DMG is converted to UDZO
+# read-only-compressed at the end.
+RW_DMG=$(mktemp -t writ-rw).dmg
+rm -f "$RW_DMG"
+hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" -ov -format UDRW \
+  -fs HFS+ -fsargs "-c c=64,a=16,e=16" "$RW_DMG" | tail -2
+
+echo "==> Mounting for Finder layout..."
+# Let hdiutil mount at the default /Volumes/<volname>. Finder only
+# scripts disks it has registered, and that watch is limited to
+# /Volumes. Custom -mountpoint paths produce -1728 "can't get disk".
+hdiutil attach "$RW_DMG" -noautoopen | tail -2
+MOUNT_DIR="/Volumes/$VOLNAME"
+# Beat for Finder to register the new volume.
+sleep 2
+
+# Drive Finder via AppleScript to position icons, hide the toolbar,
+# and pin the window to a compact 540×380 frame with the custom
+# background. Sleep a beat between each command — Finder's view
+# settings sometimes don't stick if we don't yield.
+osascript <<EOF
+tell application "Finder"
+  tell disk "$VOLNAME"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {200, 200, 740, 580}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 96
+    set background picture of viewOptions to file ".background:background.png"
+    set position of item "Writ.app" of container window to {140, 180}
+    set position of item "Applications" of container window to {400, 180}
+    set position of item "README.rtf" of container window to {270, 320}
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+EOF
+
+# Make sure .DS_Store flushes before we detach.
+sync
+sleep 2
+hdiutil detach "$MOUNT_DIR" -force | tail -2 || true
+rmdir "$MOUNT_DIR" 2>/dev/null || true
+
+# Convert read/write → read-only compressed for distribution.
 rm -f "$DMG"
-hdiutil create -volname "Writ" -srcfolder "$STAGE" -ov -format UDZO "$DMG" | tail -2
+hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" | tail -2
+rm -f "$RW_DMG"
 
 # Sign the DMG itself so Gatekeeper accepts it.
 echo "==> Signing DMG..."
