@@ -75,7 +75,17 @@ public struct SwiftMarkdownParser: MarkdownParser {
             bodySource = snapshot.source
         }
 
-        let (preprocessed, mathBlocks) = MathPreprocessor.extract(bodySource)
+        // Per-document opt-out: front-matter `math: false` disables
+        // both inline and block math extraction for documents heavy
+        // with currency text or other prose that conflicts with the
+        // inline `$…$` heuristics.
+        let mathEnabled = !((frontMatter?["math"]?.lowercased() == "false"))
+        let (preprocessed, mathBlocks): (String, [MathPreprocessor.Extracted])
+        if mathEnabled {
+            (preprocessed, mathBlocks) = MathPreprocessor.extract(bodySource)
+        } else {
+            (preprocessed, mathBlocks) = (bodySource, [])
+        }
         let document = Document(parsing: preprocessed, options: [.parseBlockDirectives])
 
         let parseDuration = parseClock.now - parseStart

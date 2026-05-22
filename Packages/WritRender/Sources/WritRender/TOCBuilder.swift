@@ -3,9 +3,9 @@ import WritParser
 
 /// Builds a table-of-contents HTML fragment from a document's headings.
 ///
-/// Anchors target the `id="h-<slug>"` form that `HTMLEmitter` writes on
-/// each heading element. Levels are nested via `<ol>` to give the export
-/// a readable hierarchy without inline-level CSS hacks.
+/// Anchors target the unprefixed `id="<slug>"` form that `HTMLEmitter`
+/// writes on each heading element. Levels are nested via `<ol>` to give
+/// the export a readable hierarchy without inline-level CSS hacks.
 public enum TOCBuilder {
     /// Emits a `<nav class="writ-toc">` block. Returns the empty string
     /// when the document has no headings — the caller can prepend
@@ -36,7 +36,7 @@ public enum TOCBuilder {
                 out.append("</li>\n")
             }
             let slug = HeadingSlug.make(heading.title)
-            let anchor = slug.isEmpty ? "" : "#h-\(slug)"
+            let anchor = slug.isEmpty ? "" : "#\(slug)"
             out.append("<li><a href=\"\(anchor)\">\(escapeHTML(heading.title))</a>")
         }
         // Close out any open levels.

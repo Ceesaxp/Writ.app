@@ -528,6 +528,21 @@ final class PreviewNavigationHelper: NSObject, WKNavigationDelegate {
             return
         }
 
+        // Same-document fragment-only navigation (`[Foo](#section)`):
+        // let WebKit scroll to the anchor in the preview shell. Without
+        // this, fragment clicks fall through to the external-handoff
+        // path below and the user gets a "Writ is trying to open
+        // preview.html" warning instead of the expected scroll.
+        if action.navigationType == .linkActivated,
+           url.fragment != nil,
+           let current = webView.url,
+           url.path == current.path,
+           url.host == current.host,
+           url.scheme == current.scheme {
+            decisionHandler(.allow)
+            return
+        }
+
         // Link clicks and any other non-file navigation: only hand off
         // schemes we know are safe. A markdown document is untrusted
         // content and can carry arbitrary `app-name://` URLs that would

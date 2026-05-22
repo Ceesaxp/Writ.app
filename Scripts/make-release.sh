@@ -56,14 +56,15 @@ echo "==> Building $DMG..."
 # Stage the contents the user will see when they mount the DMG:
 #   - Writ.app                 (the bundle to drag)
 #   - Applications             (symlink target for the drag gesture)
-#   - README.rtf               (visible, rich-text install notes)
 #   - .background/             (hidden, holds the window background image)
 #   - .DS_Store                (written by Finder after we set the layout)
+# The new minimalist background already shows "Drag Writ to Applications"
+# in-image, so we no longer ship a README.rtf — would just clutter the
+# tight visual.
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-cp Scripts/dmg-resources/README.rtf "$STAGE/README.rtf"
 mkdir "$STAGE/.background"
 cp Scripts/dmg-resources/background.png "$STAGE/.background/background.png"
 
@@ -102,9 +103,11 @@ tell application "Finder"
     set icon size of viewOptions to 96
     set text size of viewOptions to 12
     set background picture of viewOptions to file ".background:background.png"
-    set position of item "Writ.app" of container window to {160, 200}
-    set position of item "Applications" of container window to {440, 200}
-    set position of item "README.rtf" of container window to {300, 340}
+    -- Icon positions chosen to align with the arrow in the background
+    -- image: Writ.app sits left of the arrow tail, Applications right of
+    -- the arrow head, both at the same vertical level (~y=250).
+    set position of item "Writ.app" of container window to {150, 250}
+    set position of item "Applications" of container window to {450, 250}
     update without registering applications
     delay 1
     close

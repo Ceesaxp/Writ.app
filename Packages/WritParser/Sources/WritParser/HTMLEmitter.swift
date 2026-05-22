@@ -63,7 +63,11 @@ struct HTMLEmitter: MarkupWalker {
             // the slug would be empty (heading was punctuation or
             // pure markdown).
             let slug = HeadingSlug.make(h.plainText)
-            let anchor = slug.isEmpty ? id : "h-\(slug)"
+            // Unprefixed slugs so user-authored cross-references like
+            // `[Foo](#foo)` resolve. Falls back to the block counter
+            // when the slug would be empty (heading was punctuation or
+            // pure markdown).
+            let anchor = slug.isEmpty ? id : slug
             out.append("<h\(h.level) id=\"\(anchor)\" data-writ-id=\"\(id)\"\(lineAttr)>")
             emitInlines(h.children)
             out.append("</h\(h.level)>\n")

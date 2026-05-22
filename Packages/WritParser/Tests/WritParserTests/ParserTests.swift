@@ -5,16 +5,6 @@ import WritCore
 
 @Suite("MathPreprocessor")
 struct MathPreprocessorTests {
-    @Test("Block math is replaced by div placeholder")
-    func blockMath() {
-        let (out, blocks) = MathPreprocessor.extract("before $$x^2$$ after")
-        #expect(blocks.count == 1)
-        #expect(blocks[0].isBlock)
-        #expect(blocks[0].block.source == "x^2")
-        #expect(out.contains("data-writ-block=\"MATH_0\""))
-        #expect(!out.contains("$$"))
-    }
-
     @Test("Inline math is replaced by span placeholder")
     func inlineMath() {
         let (out, blocks) = MathPreprocessor.extract("inline $a+b$ math")
@@ -24,10 +14,61 @@ struct MathPreprocessorTests {
         #expect(out.contains("class=\"writ-math-inline\""))
     }
 
+    @Test("Block math: $$ must be alone on its line")
+    func blockRequiresOwnLine() {
+        // Mid-line $$ no longer opens a block (GitHub / Pandoc strict).
+        let (_, mid) = MathPreprocessor.extract("before $$x^2$$ after")
+        #expect(mid.isEmpty, "mid-line $$ should not extract block math")
+        // Proper standalone $$ does.
+        let (_, own) = MathPreprocessor.extract("$$\nx = y\n$$")
+        #expect(own.count == 1)
+        #expect(own[0].isBlock)
+        #expect(own[0].block.source == "x = y\n")
+    }
+
+    @Test("Block math: leading whitespace before $$ is allowed")
+    func blockToleratesIndent() {
+        let (_, blocks) = MathPreprocessor.extract("  $$\nx\n  $$")
+        #expect(blocks.count == 1)
+        #expect(blocks[0].isBlock)
+    }
+
     @Test("Whitespace-adjacent inline math is not extracted")
     func currencySafe() {
         let (_, blocks) = MathPreprocessor.extract("It costs $ 5 and $10.")
         #expect(blocks.isEmpty)
+    }
+
+    @Test("Currency: $5 and $10 should not become math")
+    func currencyTwoAmounts() {
+        let (_, blocks) = MathPreprocessor.extract("Profit was $5 and $10 last quarter.")
+        #expect(blocks.isEmpty)
+    }
+
+    @Test("Currency: $5m and $10m should not become math (digit after close)")
+    func currencyMillions() {
+        let (_, blocks) = MathPreprocessor.extract("They raised $5m at a $10m valuation.")
+        #expect(blocks.isEmpty)
+    }
+
+    @Test("Currency: $50 → $75 (arrow between amounts)")
+    func currencyArrow() {
+        let (_, blocks) = MathPreprocessor.extract("Pricing went $50 → $75 last week.")
+        #expect(blocks.isEmpty)
+    }
+
+    @Test("Inline math: opener must follow non-alphanumeric")
+    func openerAfterLetter() {
+        // `foo$bar$` — the `$` is preceded by a letter; should not open math.
+        let (_, blocks) = MathPreprocessor.extract("see foo$bar$ here")
+        #expect(blocks.isEmpty)
+    }
+
+    @Test("Inline math: real math survives strict rules")
+    func mathSurvivesStrict() {
+        let (_, blocks) = MathPreprocessor.extract("Solve $x + y = z$ for x.")
+        #expect(blocks.count == 1)
+        #expect(blocks[0].block.source == "x + y = z")
     }
 
     @Test("Escaped dollar is not math")
@@ -41,12 +82,37 @@ struct MathPreprocessorTests {
         let (_, blocks) = MathPreprocessor.extract("open $a+b\nc+d$ close")
         #expect(blocks.isEmpty)
     }
+}
 
-    @Test("Block math may span newlines")
-    func blockSpansLines() {
-        let (_, blocks) = MathPreprocessor.extract("$$\nx = y\n$$")
-        #expect(blocks.count == 1)
-        #expect(blocks[0].isBlock)
+@Suite("Math front-matter opt-out")
+struct MathOptOutTests {
+    @Test("math: false in front matter disables math extraction")
+    func mathFalseDisables() throws {
+        let src = """
+        ---
+        math: false
+        ---
+        Cost is $50 each. Inline $x + y$ here.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        #expect(!parsed.html.contains("writ-math-inline"))
+        #expect(!parsed.html.contains("writ-math-block"))
+        // Source dollars survive in the rendered HTML.
+        #expect(parsed.html.contains("$50"))
+    }
+
+    @Test("Default (no flag) keeps math enabled")
+    func mathDefaultEnabled() throws {
+        let src = """
+        ---
+        title: Math doc
+        ---
+        Inline $x + y$ here.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        #expect(parsed.html.contains("writ-math-inline"))
     }
 }
 
@@ -61,6 +127,14 @@ struct ParserTests {
         #expect(p.html.contains("<h1"))
         #expect(p.html.contains("data-writ-id="))
         #expect(p.html.contains("Hello"))
+    }
+
+    @Test("Heading anchor id matches unprefixed slug for [text](#slug) cross-refs")
+    func headingAnchorUnprefixed() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "## Section Two\n\n[jump](#section-two)")
+        let p = try parser.parse(s)
+        #expect(p.html.contains("id=\"section-two\""))
+        #expect(!p.html.contains("id=\"h-section-two\""))
     }
 
     @Test("Code fence with language becomes preview-highlightable")
@@ -96,7 +170,8 @@ struct ParserTests {
 
     @Test("Block math is recognized through preprocessor")
     func dollarBlock() throws {
-        let s = DocumentSnapshot(revision: .zero, source: "$$x^2$$")
+        // Block math now requires `$$` to be alone on its line.
+        let s = DocumentSnapshot(revision: .zero, source: "$$\nx^2\n$$")
         let p = try parser.parse(s)
         #expect(p.blocks.contains { $0.kind == .math })
     }
