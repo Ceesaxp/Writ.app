@@ -16,6 +16,37 @@ enum ExportService {
         set { UserDefaults.standard.set(newValue, forKey: includeTOCDefaultsKey) }
     }
 
+    /// PDF paper size preference. PostScript points (1/72 inch).
+    /// US Letter: 612×792 pt. A4: 595×842 pt. Default Letter so
+    /// existing exports keep their dimensions.
+    enum PDFPaperSize: String, CaseIterable, Sendable {
+        case usLetter = "letter"
+        case a4 = "a4"
+
+        var displayName: String {
+            switch self {
+            case .usLetter: return "US Letter (8.5 × 11 in)"
+            case .a4: return "A4 (210 × 297 mm)"
+            }
+        }
+
+        var pointSize: NSSize {
+            switch self {
+            case .usLetter: return NSSize(width: 612, height: 792)
+            case .a4:       return NSSize(width: 595, height: 842)
+            }
+        }
+    }
+
+    static let pdfPaperSizeDefaultsKey = "WritPDFPaperSize"
+    static var pdfPaperSize: PDFPaperSize {
+        get {
+            let raw = UserDefaults.standard.string(forKey: pdfPaperSizeDefaultsKey) ?? PDFPaperSize.usLetter.rawValue
+            return PDFPaperSize(rawValue: raw) ?? .usLetter
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: pdfPaperSizeDefaultsKey) }
+    }
+
     /// Captures the live preview DOM (already-rendered math, Mermaid, etc.),
     /// wraps it with the bundled CSS, and writes the result to `url`. Falls
     /// back to the parser output if the preview can't be captured.

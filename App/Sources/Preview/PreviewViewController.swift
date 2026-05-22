@@ -317,6 +317,7 @@ final class PreviewViewController: NSViewController {
         let host = webView
         let target = url
         previewLog.notice("[pdf] entry: target=\(target.path, privacy: .public)")
+        previewLog.notice("[pdf] webView frame=\(String(describing: host?.frame), privacy: .public)")
 
         // Probe how loaded the WebKit content is before we begin so we can
         // tell "PDF export is slow because there's a lot of mermaid" from
@@ -335,6 +336,9 @@ final class PreviewViewController: NSViewController {
             previewLog.notice("[pdf] dom snapshot: \(String(describing: value), privacy: .public)")
         }
 
+        // After settle delay, run the paginated print path. If it
+        // produces an unusable file (missing or tiny), we fall back
+        // to WKWebView.createPDF — single page, but reliable.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             previewLog.notice("[pdf] settle delay elapsed, building NSPrintInfo")
             guard let host else {
@@ -343,15 +347,25 @@ final class PreviewViewController: NSViewController {
                 return
             }
 
+            // Per-document NSPrintInfo (not the shared one — the
+            // shared instance can carry stale jobSavingURL across
+            // exports and we'd write into the previous target).
             let info = NSPrintInfo()
             info.jobDisposition = .save
             info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = target as NSURL
-            info.paperSize = NSSize(width: 612, height: 792) // US Letter
+            let paper = ExportService.pdfPaperSize.pointSize
+            info.paperSize = paper
+            // `paperSize` must be matched by the bounds inside the
+            // dictionary; some macOS releases clear `paperSize`
+            // back to the shared default if the matched bounds key
+            // isn't set explicitly.
+            info.dictionary()[NSPrintInfo.AttributeKey.paperSize] = NSValue(size: paper)
             info.topMargin = 36
             info.bottomMargin = 36
             info.leftMargin = 36
             info.rightMargin = 36
             info.orientation = .portrait
+            previewLog.notice("[pdf] paper=\(ExportService.pdfPaperSize.rawValue, privacy: .public) size=\(paper.width)x\(paper.height)")
             info.horizontalPagination = .fit
             info.verticalPagination = .automatic
             info.isHorizontallyCentered = false
@@ -427,8 +441,51 @@ final class PreviewViewController: NSViewController {
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
         os_log("[pdf] runModal completed after %.2fs", log: previewOsLog, type: .info, duration)
         previewLog.notice("[pdf] runModal completed: success=\(success), duration=\(String(format: "%.2fs", duration), privacy: .public), file exists=\(exists), size=\(size)")
+
+        // Blank-PDF defense. macOS 26 has been intermittently
+        // dropping the runModal .save output — the print operation
+        // returns success=true but the file is either missing or
+        // contains a single blank page (<2 KB). When that happens,
+        // fall back to WKWebView.createPDF which captures the live
+        // WebView content directly. Single page, but legible
+        // content beats a blank multi-pager.
+        let suspect = !exists || size < 2048
+        if suspect {
+            previewLog.notice("[pdf] suspicious output (size=\(size)); falling back to createPDF")
+            fallbackCreatePDF(to: url) { [weak self] ok in
+                self?.onExportFinished?(url, ok)
+                self?.activePrintCompletion = nil
+            }
+            return
+        }
         onExportFinished?(url, exists && size > 0)
         activePrintCompletion = nil
+    }
+
+    /// Fallback: render the WebView contents to a single-page PDF
+    /// via the modern API. Sidesteps the NSPrintInfo / jobSavingURL
+    /// dance entirely.
+    private func fallbackCreatePDF(to url: URL, completion: @escaping (Bool) -> Void) {
+        guard let host = webView else { completion(false); return }
+        let config = WKPDFConfiguration()
+        // rect = nil → full WebView bounds.
+        config.rect = nil
+        host.createPDF(configuration: config) { result in
+            switch result {
+            case .success(let data):
+                do {
+                    try data.write(to: url, options: .atomic)
+                    previewLog.notice("[pdf] createPDF wrote \(data.count) bytes")
+                    completion(true)
+                } catch {
+                    previewLog.error("[pdf] createPDF write failed: \(error.localizedDescription, privacy: .public)")
+                    completion(false)
+                }
+            case .failure(let err):
+                previewLog.error("[pdf] createPDF failed: \(err.localizedDescription, privacy: .public)")
+                completion(false)
+            }
+        }
     }
 }
 

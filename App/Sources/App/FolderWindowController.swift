@@ -54,9 +54,14 @@ final class FolderWindowController: NSWindowController, NSWindowDelegate, NSOutl
         self.root = empty
         self.filteredRoot = empty
 
+        // .utilityWindow gives the thin titlebar + float-above-docs
+        // behaviour we want (Photoshop tool-palette feel). We
+        // deliberately do NOT add .hudWindow — that flips the whole
+        // panel into the dark heads-up-display chrome which clashes
+        // with the document windows in light mode.
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 280, height: 580),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .utilityWindow, .hudWindow],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .utilityWindow],
             backing: .buffered,
             defer: false
         )

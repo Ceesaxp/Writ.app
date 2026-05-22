@@ -17,10 +17,11 @@ final class PreferencesWindowController: NSWindowController {
     private let lineNumbersCheckbox = NSButton(checkboxWithTitle: "Show line numbers", target: nil, action: nil)
     private let tocCheckbox = NSButton(checkboxWithTitle: "Include table of contents in HTML / PDF export", target: nil, action: nil)
     private let fontPopup = NSPopUpButton()
+    private let paperSizePopup = NSPopUpButton()
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 370),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 410),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -82,6 +83,18 @@ final class PreferencesWindowController: NSWindowController {
             fontPopup.lastItem?.representedObject = family
         }
 
+        let paperSizeLabel = NSTextField(labelWithString: "PDF page size:")
+        paperSizeLabel.translatesAutoresizingMaskIntoConstraints = false
+        paperSizeLabel.font = NSFont.systemFont(ofSize: 13)
+
+        paperSizePopup.translatesAutoresizingMaskIntoConstraints = false
+        paperSizePopup.target = self
+        paperSizePopup.action = #selector(paperSizeChanged(_:))
+        for size in ExportService.PDFPaperSize.allCases {
+            paperSizePopup.addItem(withTitle: size.displayName)
+            paperSizePopup.lastItem?.representedObject = size.rawValue
+        }
+
         let resetButton = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults(_:)))
         resetButton.translatesAutoresizingMaskIntoConstraints = false
         resetButton.bezelStyle = .rounded
@@ -99,6 +112,8 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(tocCheckbox)
         contentView.addSubview(fontLabel)
         contentView.addSubview(fontPopup)
+        contentView.addSubview(paperSizeLabel)
+        contentView.addSubview(paperSizePopup)
         contentView.addSubview(resetButton)
 
         let row1Y = contentView.bottomAnchor
@@ -153,7 +168,15 @@ final class PreferencesWindowController: NSWindowController {
             fontPopup.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
             fontPopup.widthAnchor.constraint(equalToConstant: 200),
 
-            resetButton.topAnchor.constraint(equalTo: fontLabel.bottomAnchor, constant: 16),
+            paperSizeLabel.topAnchor.constraint(equalTo: fontLabel.bottomAnchor, constant: 10),
+            paperSizeLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            paperSizeLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            paperSizePopup.centerYAnchor.constraint(equalTo: paperSizeLabel.centerYAnchor),
+            paperSizePopup.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            paperSizePopup.widthAnchor.constraint(equalToConstant: 220),
+
+            resetButton.topAnchor.constraint(equalTo: paperSizeLabel.bottomAnchor, constant: 16),
             resetButton.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor)
         ])
         _ = row1Y
@@ -174,10 +197,22 @@ final class PreferencesWindowController: NSWindowController {
             ($0.representedObject as? String) == current
         }
         fontPopup.selectItem(at: matchIndex ?? 0)
+
+        let paperRaw = ExportService.pdfPaperSize.rawValue
+        let paperMatch = paperSizePopup.itemArray.firstIndex {
+            ($0.representedObject as? String) == paperRaw
+        }
+        paperSizePopup.selectItem(at: paperMatch ?? 0)
     }
 
     @objc private func fontFamilyChanged(_ sender: NSPopUpButton) {
         EditorViewController.selectedFontFamily = sender.selectedItem?.representedObject as? String
+    }
+
+    @objc private func paperSizeChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let size = ExportService.PDFPaperSize(rawValue: raw) else { return }
+        ExportService.pdfPaperSize = size
     }
 
     @objc private func fieldDidCommit(_ sender: NSTextField) {
@@ -203,6 +238,7 @@ final class PreferencesWindowController: NSWindowController {
         EditorViewController.lineNumbersEnabled = true
         EditorViewController.selectedFontFamily = nil
         ExportService.includeTOC = false
+        ExportService.pdfPaperSize = .usLetter
         loadFromDefaults()
     }
 }
