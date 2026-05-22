@@ -255,16 +255,12 @@ final class WritDocument: NSDocument {
                     controller?.statusBar.setExportStatus(nil)
                 }
             }
-            // Wire the optional TOC + document title into the
-            // preview's pending-export slots. The offscreen PDF
-            // pipeline picks them up directly when composing the
-            // export HTML — no DOM injection / removal dance on
-            // the live preview.
+            // Optional TOC — `PreviewViewController.exportPDF` injects
+            // the block into the live preview, runs the print, then
+            // removes it again on completion.
             controller.preview.pendingExportTOC = ExportService.includeTOC
                 ? TOCBuilder.render(from: self.sourceText)
                 : nil
-            controller.preview.pendingExportTitle = self.bridge.currentParsedDocument?.frontMatter?["title"]
-                ?? (self.displayName as NSString?)?.deletingPathExtension
             controller.preview.exportPDF(to: url)
         }
     }
