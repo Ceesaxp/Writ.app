@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import WritCore
 @testable import WritParser
 
@@ -286,6 +287,31 @@ struct ParserTests {
         let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: "# Just a heading\n"))
         #expect(parsed.frontMatter == nil)
         #expect(!parsed.html.contains("writ-front-matter"))
+    }
+
+    @Test("Front matter range emerges as a SyntaxSpan for the editor")
+    func frontMatterSyntaxSpan() throws {
+        let src = """
+        ---
+        title: Hello
+        ---
+
+        # Body
+        """
+        let extractor = SyntaxSpanExtractor()
+        let spans = extractor.extract(from: src)
+        let fmSpans = spans.filter { $0.kind == .frontMatter }
+        #expect(fmSpans.count == 1, "exactly one frontMatter span per document")
+
+        let fm = fmSpans[0]
+        // The span should cover the opener, body, and closer — i.e.
+        // up through the closing `---\n`. The first heading after is
+        // outside the span.
+        let ns = src as NSString
+        let covered = ns.substring(with: fm.range)
+        #expect(covered.contains("title: Hello"))
+        #expect(covered.contains("---"))
+        #expect(!covered.contains("# Body"), "body markdown stays outside the FM range")
     }
 
     @Test("Malformed front matter (no closer) is left as body text")

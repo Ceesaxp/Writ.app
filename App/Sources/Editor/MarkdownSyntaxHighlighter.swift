@@ -30,6 +30,7 @@ final class MarkdownSyntaxHighlighter {
         let listMarker: NSColor
         let html: NSColor
         let thematicBreak: NSColor
+        let frontMatter: NSColor
     }
 
     private static let darkStyle = Style(
@@ -44,7 +45,8 @@ final class MarkdownSyntaxHighlighter {
         blockquote: NSColor(calibratedRed: 0.65, green: 0.65, blue: 0.7, alpha: 1),
         listMarker: NSColor(calibratedRed: 0.7, green: 0.7, blue: 0.95, alpha: 1),
         html: NSColor(calibratedRed: 0.55, green: 0.85, blue: 0.95, alpha: 1),
-        thematicBreak: NSColor(calibratedWhite: 0.55, alpha: 1)
+        thematicBreak: NSColor(calibratedWhite: 0.55, alpha: 1),
+        frontMatter: NSColor(calibratedWhite: 0.50, alpha: 1)
     )
 
     private static let lightStyle = Style(
@@ -59,7 +61,8 @@ final class MarkdownSyntaxHighlighter {
         blockquote: NSColor(calibratedRed: 0.45, green: 0.45, blue: 0.52, alpha: 1),
         listMarker: NSColor(calibratedRed: 0.40, green: 0.30, blue: 0.65, alpha: 1),
         html: NSColor(calibratedRed: 0.05, green: 0.45, blue: 0.60, alpha: 1),
-        thematicBreak: NSColor(calibratedWhite: 0.55, alpha: 1)
+        thematicBreak: NSColor(calibratedWhite: 0.55, alpha: 1),
+        frontMatter: NSColor(calibratedWhite: 0.60, alpha: 1)
     )
 
     @MainActor
@@ -121,6 +124,15 @@ final class MarkdownSyntaxHighlighter {
                 storage.addAttribute(.foregroundColor, value: style.html, range: range)
             case .thematicBreak, .tableSeparator:
                 storage.addAttribute(.foregroundColor, value: style.thematicBreak, range: range)
+            case .frontMatter:
+                // Treat the YAML/TOML header as meta, not prose.
+                // A muted foreground (no bold, no background) reads
+                // as "this is metadata you usually ignore" without
+                // hiding it outright.
+                storage.addAttribute(.foregroundColor, value: style.frontMatter, range: range)
+                if let italic = NSFont(descriptor: baseFont.fontDescriptor.withSymbolicTraits(.italic), size: baseFont.pointSize) {
+                    storage.addAttribute(.font, value: italic, range: range)
+                }
             }
         }
         storage.endEditing()

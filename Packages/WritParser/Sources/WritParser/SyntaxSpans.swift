@@ -31,6 +31,7 @@ public struct SyntaxSpan: Sendable, Hashable {
         case htmlBlock         // raw inline / block HTML
         case thematicBreak     // ---
         case tableSeparator    // | --- | --- |
+        case frontMatter       // YAML --- / TOML +++ block at document head
     }
 
     public let range: NSRange
@@ -53,7 +54,28 @@ public struct SyntaxSpanExtractor {
         let document = Document(parsing: source, options: [.parseBlockDirectives])
         var visitor = Walker(source: source)
         visitor.visit(document)
+        // Front matter wins over everything else inside its range.
+        // The apply loop is last-write-wins on overlap, so this goes
+        // at the END — the AST walker will have emitted spans for
+        // the `---` lines as thematic breaks (or a setext heading
+        // for `+++`) which we want overwritten with the muted FM
+        // styling.
+        if let fmRange = frontMatterRange(in: source) {
+            visitor.spans.append(SyntaxSpan(range: fmRange, kind: .frontMatter))
+        }
         return visitor.spans
+    }
+
+    private func frontMatterRange(in source: String) -> NSRange? {
+        // Reuse FrontMatterExtractor so the editor and the renderer
+        // agree byte-for-byte on what counts as front matter.
+        guard let (fm, _) = FrontMatterExtractor.extract(source) else { return nil }
+        // FrontMatter.charCount is measured in Character units (the
+        // extractor walks Swift Strings). Map back to NSRange / UTF-16
+        // by taking the prefix and asking for its UTF-16 length.
+        let prefix = source.prefix(fm.charCount)
+        let utf16Length = (String(prefix) as NSString).length
+        return NSRange(location: 0, length: utf16Length)
     }
 }
 
