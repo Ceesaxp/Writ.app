@@ -267,43 +267,30 @@ final class PreviewViewController: NSViewController {
     /// any "Exporting…" indicator.
     var onExportFinished: ((URL, Bool) -> Void)?
 
-    /// Inserts an export-only TOC block at the top of `#writ-content`.
-    /// Used by the PDF export flow when the user has enabled TOC in
-    /// Settings; the block carries a sentinel id so `removePDFExportTOC`
-    /// can take it out again after the print operation finishes.
-    func insertPDFExportTOC(_ tocHTML: String, completion: @escaping () -> Void) {
-        // Escape backticks/backslashes for safe embedding in JS template.
-        let escaped = tocHTML
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "`", with: "\\`")
-        let js = """
-            (function(){
-              var root = document.getElementById('writ-content');
-              if (!root) return;
-              var holder = document.createElement('div');
-              holder.id = 'writ-export-toc';
-              holder.innerHTML = `\(escaped)`;
-              root.insertBefore(holder, root.firstChild);
-            })()
-            """
-        webView.evaluateJavaScript(js) { _, _ in completion() }
-    }
+    /// Optional TOC HTML to prepend to the exported document body.
+    /// Used by `WritDocument.exportPDF` when the user enabled the
+    /// "Include TOC" setting — the document supplies the rendered
+    /// nav block, the controller weaves it into the export HTML.
+    /// Nil means no TOC.
+    var pendingExportTOC: String?
 
-    func removePDFExportTOC() {
-        let js = """
-            (function(){
-              var el = document.getElementById('writ-export-toc');
-              if (el && el.parentNode) el.parentNode.removeChild(el);
-            })()
-            """
-        webView.evaluateJavaScript(js, completionHandler: nil)
-    }
+    /// Source text to pass through to `HTMLExporter` so the title
+    /// is taken from front matter when available. Set by
+    /// `WritDocument.exportPDF` just before calling this method.
+    var pendingExportSource: String?
+
+    /// Standalone HTML composer used by the PDF export path.
+    /// Injected by `WritDocument.exportPDF` so the controller
+    /// doesn't have to drag in the asset-resolution helpers that
+    /// live next to the document.
+    var pendingExportHTML: ((String) -> Void)? // legacy slot; unused
 
     func exportPDF(to url: URL, then: (() -> Void)? = nil) {
+        // Wrap the export-finished handler so the optional `then`
+        // closure fires before the original completion runs and
+        // is restored after.
         let originalOnFinished = onExportFinished
         if let then {
-            // Chain the user's completion + the TOC-removal hook so
-            // the export call site doesn't have to remember either.
             onExportFinished = { [weak self] finishedURL, ok in
                 then()
                 originalOnFinished?(finishedURL, ok)
@@ -313,179 +300,200 @@ final class PreviewViewController: NSViewController {
         exportPDFImpl(to: url)
     }
 
+    /// Offscreen WebView spun up specifically for the current PDF
+    /// export. Retained for the duration of the export so it
+    /// survives the async didFinish + createPDF callbacks.
+    private var pdfExportWebView: WKWebView?
+    private var pdfExportNavDelegate: PDFExportNavHelper?
+
     private func exportPDFImpl(to url: URL) {
-        let host = webView
         let target = url
-        previewLog.notice("[pdf] entry: target=\(target.path, privacy: .public)")
-        previewLog.notice("[pdf] webView frame=\(String(describing: host?.frame), privacy: .public)")
+        let paper = ExportService.pdfPaperSize.pointSize
+        previewLog.notice("[pdf] entry target=\(target.path, privacy: .public) paper=\(ExportService.pdfPaperSize.rawValue, privacy: .public) size=\(paper.width)x\(paper.height)")
+        previewLog.notice("[pdf] live webView frame=\(String(describing: self.webView?.frame), privacy: .public)")
 
-        // Probe how loaded the WebKit content is before we begin so we can
-        // tell "PDF export is slow because there's a lot of mermaid" from
-        // "PDF export is hung in the print operation".
-        host?.evaluateJavaScript("""
-            (function() {
-              var imgs = document.querySelectorAll('img').length;
-              var pre = document.querySelectorAll('pre').length;
-              var mermaid = document.querySelectorAll('.writ-mermaid').length;
-              var mermaidSvgs = document.querySelectorAll('.writ-mermaid svg').length;
-              var math = document.querySelectorAll('.writ-math-block,.writ-math-inline').length;
-              var bodyLen = (document.body.innerHTML || '').length;
-              return JSON.stringify({imgs, pre, mermaid, mermaidSvgs, math, bodyLen});
-            })()
-        """) { value, _ in
-            previewLog.notice("[pdf] dom snapshot: \(String(describing: value), privacy: .public)")
-        }
-
-        // After settle delay, run the paginated print path. If it
-        // produces an unusable file (missing or tiny), we fall back
-        // to WKWebView.createPDF — single page, but reliable.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            previewLog.notice("[pdf] settle delay elapsed, building NSPrintInfo")
-            guard let host else {
-                previewLog.error("[pdf] aborting: webview gone")
-                self?.onExportFinished?(target, false)
-                return
-            }
-
-            // Per-document NSPrintInfo (not the shared one — the
-            // shared instance can carry stale jobSavingURL across
-            // exports and we'd write into the previous target).
-            let info = NSPrintInfo()
-            info.jobDisposition = .save
-            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = target as NSURL
-            let paper = ExportService.pdfPaperSize.pointSize
-            info.paperSize = paper
-            // `paperSize` must be matched by the bounds inside the
-            // dictionary; some macOS releases clear `paperSize`
-            // back to the shared default if the matched bounds key
-            // isn't set explicitly.
-            info.dictionary()[NSPrintInfo.AttributeKey.paperSize] = NSValue(size: paper)
-            info.topMargin = 36
-            info.bottomMargin = 36
-            info.leftMargin = 36
-            info.rightMargin = 36
-            info.orientation = .portrait
-            previewLog.notice("[pdf] paper=\(ExportService.pdfPaperSize.rawValue, privacy: .public) size=\(paper.width)x\(paper.height)")
-            info.horizontalPagination = .fit
-            info.verticalPagination = .automatic
-            info.isHorizontallyCentered = false
-            info.isVerticallyCentered = false
-
-            previewLog.notice("[pdf] printOperation(with:) building")
-            let op = host.printOperation(with: info)
-            op.showsPrintPanel = false
-            op.showsProgressPanel = false
-            previewLog.notice("[pdf] op built, showsPrintPanel=\(op.showsPrintPanel) showsProgressPanel=\(op.showsProgressPanel)")
-
-            // `NSPrintOperation.run()` is synchronous and blocks the calling
-            // thread until the print job is finished. For WKWebView's print
-            // pipeline that's a deadlock: the operation needs to IPC with
-            // the WebContent process to lay out the content into pages, but
-            // the IPC can't be serviced because the main thread is blocked
-            // inside run(). Confirmed by 38s of heartbeats with no return
-            // on integration-architecture.md (4 Mermaid SVGs, 8 <pre>, ~100KB
-            // body HTML).
-            //
-            // The fix is `runModal(for:delegate:didRun:contextInfo:)`. With
-            // showsPrintPanel = false it doesn't actually show a panel — it
-            // just runs the operation in a modal session that yields to the
-            // runloop, so WebContent IPC can complete. We're notified via
-            // the @objc selector when it finishes.
-            let runStart = Date()
-            let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-            heartbeat.schedule(deadline: .now() + 1, repeating: 1)
-            heartbeat.setEventHandler { @Sendable in
-                let elapsed = Date().timeIntervalSince(runStart)
-                os_log("[pdf] heartbeat: runModal in flight for %.1fs", log: previewOsLog, type: .info, elapsed)
-            }
-            heartbeat.resume()
-
-            // The completion handler needs to outlive this scope — store it
-            // on self so it isn't deallocated before the @objc callback fires.
-            let completion = PrintCompletionHandler(target: target, runStart: runStart, heartbeat: heartbeat) { [weak self] url, ok in
-                self?.onExportFinished?(url, ok)
-            }
-            self?.activePrintCompletion = completion
-
-            guard let window = host.window ?? NSApplication.shared.mainWindow else {
-                previewLog.error("[pdf] no host window for runModal — falling back to run()")
-                let started = op.run()
-                heartbeat.cancel()
-                let exists = FileManager.default.fileExists(atPath: target.path)
-                let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
-                previewLog.notice("[pdf] fallback op.run() returned \(started), file exists=\(exists), size=\(size)")
-                self?.onExportFinished?(target, exists && size > 0)
-                self?.activePrintCompletion = nil
-                return
-            }
-
-            previewLog.notice("[pdf] runModal(for:delegate:didRun:contextInfo:) entering")
-            os_log("[pdf] runModal entering (non-blocking, will service runloop)", log: previewOsLog, type: .info)
-            op.runModal(
-                for: window,
-                delegate: completion,
-                didRun: #selector(PrintCompletionHandler.printOperationDidRun(_:success:contextInfo:)),
-                contextInfo: nil
-            )
+        // Step 1: capture the live preview's #writ-content innerHTML
+        // (post-KaTeX, post-Mermaid, post-hljs). We'll feed this to
+        // an offscreen WKWebView whose frame we control — eliminates
+        // every "what if the visible WebView is sized 0" failure mode.
+        capturedContentHTML { [weak self] captured in
+            guard let self else { return }
+            let bodyHTML = captured ?? ""
+            previewLog.notice("[pdf] captured body \(bodyHTML.utf8.count) bytes")
+            self.renderOffscreenPDF(bodyHTML: bodyHTML, paper: paper, to: target)
         }
     }
 
-    /// Strong reference to the print-completion callback target so it survives
-    /// the async `runModal` callback path.
-    private var activePrintCompletion: PrintCompletionHandler?
+    private func renderOffscreenPDF(bodyHTML: String, paper: NSSize, to target: URL) {
+        // Step 2: build the standalone HTML doc — same path the
+        // HTML export uses. Includes theme + KaTeX + hljs CSS
+        // inlined so the offscreen WebView can render without any
+        // external resource fetch.
+        let css = Self.bundledExportCSS()
+        let toc = ExportService.includeTOC ? (pendingExportTOC ?? "") : ""
+        let title = pendingExportTitle ?? "Writ Export"
+        let html = HTMLExporter.render(
+            body: bodyHTML,
+            theme: "auto",
+            css: css + Self.pdfPageCSS(paper: paper),
+            toc: toc,
+            title: title
+        )
+        previewLog.notice("[pdf] standalone HTML composed: \(html.utf8.count) bytes")
 
-    fileprivate func printDidComplete(_ url: URL, success: Bool, runStart: Date, heartbeat: DispatchSourceTimer) {
-        heartbeat.cancel()
-        let duration = Date().timeIntervalSince(runStart)
-        let exists = FileManager.default.fileExists(atPath: url.path)
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-        os_log("[pdf] runModal completed after %.2fs", log: previewOsLog, type: .info, duration)
-        previewLog.notice("[pdf] runModal completed: success=\(success), duration=\(String(format: "%.2fs", duration), privacy: .public), file exists=\(exists), size=\(size)")
+        // Step 3: spin up an offscreen WebView. Width = paper width;
+        // height starts large so the WebView's auto-layout doesn't
+        // truncate content before we measure. We'll resize to
+        // scrollHeight after the document loads.
+        let config = WKWebViewConfiguration()
+        // Hand the offscreen WebView the same writ-doc:// handler so
+        // relative-path images in the captured HTML still resolve.
+        let scheme = WritDocSchemeHandler()
+        scheme.baseDirectory = self.documentDirectory
+        config.setURLSchemeHandler(scheme, forURLScheme: WritDocSchemeHandler.scheme)
 
-        // Blank-PDF defense. macOS 26 has been intermittently
-        // dropping the runModal .save output — the print operation
-        // returns success=true but the file is either missing or
-        // contains a single blank page (<2 KB). When that happens,
-        // fall back to WKWebView.createPDF which captures the live
-        // WebView content directly. Single page, but legible
-        // content beats a blank multi-pager.
-        let suspect = !exists || size < 2048
-        if suspect {
-            previewLog.notice("[pdf] suspicious output (size=\(size)); falling back to createPDF")
-            fallbackCreatePDF(to: url) { [weak self] ok in
-                self?.onExportFinished?(url, ok)
-                self?.activePrintCompletion = nil
-            }
-            return
+        let initialFrame = CGRect(x: 0, y: 0, width: paper.width, height: 20_000)
+        let offscreen = WKWebView(frame: initialFrame, configuration: config)
+        offscreen.setValue(false, forKey: "drawsBackground") // KVO trick: avoid grey background bleed in PDF output
+
+        let navDelegate = PDFExportNavHelper { [weak self] in
+            self?.offscreenDidFinishLoad(paper: paper, to: target)
         }
-        onExportFinished?(url, exists && size > 0)
-        activePrintCompletion = nil
+        offscreen.navigationDelegate = navDelegate
+
+        self.pdfExportWebView = offscreen
+        self.pdfExportNavDelegate = navDelegate
+
+        // baseURL points into the bundle so any unexpected relative
+        // resource that did sneak into the captured HTML still has
+        // a chance to load.
+        let baseURL = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "preview")?
+            .deletingLastPathComponent()
+        previewLog.notice("[pdf] offscreen WebView ready; loading HTML")
+        offscreen.loadHTMLString(html, baseURL: baseURL)
     }
 
-    /// Fallback: render the WebView contents to a single-page PDF
-    /// via the modern API. Sidesteps the NSPrintInfo / jobSavingURL
-    /// dance entirely.
-    private func fallbackCreatePDF(to url: URL, completion: @escaping (Bool) -> Void) {
-        guard let host = webView else { completion(false); return }
-        let config = WKPDFConfiguration()
-        // rect = nil → full WebView bounds.
-        config.rect = nil
-        host.createPDF(configuration: config) { result in
-            switch result {
-            case .success(let data):
-                do {
-                    try data.write(to: url, options: .atomic)
-                    previewLog.notice("[pdf] createPDF wrote \(data.count) bytes")
-                    completion(true)
-                } catch {
-                    previewLog.error("[pdf] createPDF write failed: \(error.localizedDescription, privacy: .public)")
-                    completion(false)
+    private func offscreenDidFinishLoad(paper: NSSize, to target: URL) {
+        guard let offscreen = pdfExportWebView else { return }
+        previewLog.notice("[pdf] offscreen didFinish; settling 350 ms before measure")
+        // Brief settle so any post-load layout / web font swap finishes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            offscreen.evaluateJavaScript("Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)") { value, error in
+                if let error {
+                    previewLog.error("[pdf] scrollHeight probe failed: \(error.localizedDescription, privacy: .public)")
                 }
-            case .failure(let err):
-                previewLog.error("[pdf] createPDF failed: \(err.localizedDescription, privacy: .public)")
-                completion(false)
+                let scrollHeight: CGFloat
+                if let n = value as? CGFloat { scrollHeight = n }
+                else if let n = value as? Double { scrollHeight = CGFloat(n) }
+                else if let n = value as? Int { scrollHeight = CGFloat(n) }
+                else { scrollHeight = paper.height }
+                previewLog.notice("[pdf] offscreen scrollHeight=\(scrollHeight)")
+                self?.resizeAndCreatePDF(offscreen: offscreen, paper: paper, contentHeight: scrollHeight, to: target)
             }
         }
+    }
+
+    private func resizeAndCreatePDF(offscreen: WKWebView, paper: NSSize, contentHeight: CGFloat, to target: URL) {
+        // Step 4: resize the offscreen WebView so its bounds enclose
+        // the entire content. createPDF with rect=nil then produces
+        // a single-page PDF (page width = paper.width, page height =
+        // content) — no clipping, no print system involvement.
+        let finalHeight = max(contentHeight, paper.height)
+        offscreen.frame = CGRect(x: 0, y: 0, width: paper.width, height: finalHeight)
+        previewLog.notice("[pdf] offscreen resized to \(paper.width)x\(finalHeight); 100 ms relayout settle")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            let config = WKPDFConfiguration()
+            config.rect = nil
+            offscreen.createPDF(configuration: config) { result in
+                self?.finishOffscreenPDF(result: result, to: target)
+            }
+        }
+    }
+
+    private func finishOffscreenPDF(result: Result<Data, Error>, to target: URL) {
+        let ok: Bool
+        switch result {
+        case .success(let data):
+            previewLog.notice("[pdf] createPDF success: \(data.count) bytes")
+            do {
+                try data.write(to: target, options: .atomic)
+                ok = true
+            } catch {
+                previewLog.error("[pdf] write failed: \(error.localizedDescription, privacy: .public)")
+                ok = false
+            }
+        case .failure(let err):
+            previewLog.error("[pdf] createPDF failed: \(err.localizedDescription, privacy: .public)")
+            ok = false
+        }
+        // Tear down the offscreen WebView. Capturing here is safe
+        // — the createPDF callback is the last point that needed it.
+        pdfExportWebView = nil
+        pdfExportNavDelegate = nil
+        onExportFinished?(target, ok)
+    }
+
+    /// Source for the document <title> in the export. Set by
+    /// WritDocument.exportPDF from the parsed front matter when
+    /// available.
+    var pendingExportTitle: String?
+
+    /// Bundled stylesheet stack used in HTML / PDF exports.
+    /// Combined ahead of time so the offscreen WebView only has to
+    /// parse one `<style>` block.
+    private static func bundledExportCSS() -> String {
+        func read(_ resource: String, subdir: String) -> String {
+            guard let url = Bundle.main.url(forResource: resource, withExtension: "css", subdirectory: subdir)
+                    ?? Bundle.main.url(forResource: "\(subdir)/\(resource)", withExtension: "css") else { return "" }
+            return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }
+        return read("theme", subdir: "preview")
+            + "\n" + read("katex.min", subdir: "preview/vendor/katex")
+            + "\n" + read("github.min", subdir: "preview/vendor/highlight")
+    }
+
+    /// Page-shape CSS that adapts the document to the chosen paper
+    /// size. The body becomes the page-width column; padding adds
+    /// margins; everything reads as a printable page in the PDF.
+    private static func pdfPageCSS(paper: NSSize) -> String {
+        // 36 pt = 0.5 in margins on every side.
+        let margin: CGFloat = 36
+        let contentWidth = paper.width - 2 * margin
+        return """
+        @page { size: \(paper.width)pt \(paper.height)pt; margin: \(margin)pt; }
+        html, body { margin: 0; padding: 0; }
+        body.writ-export {
+          width: \(contentWidth)pt;
+          padding: \(margin)pt;
+          box-sizing: content-box;
+          background: white;
+          color: black;
+        }
+        body.writ-export #writ-content { max-width: none; }
+        """
+    }
+}
+
+/// Plain NSObject so the offscreen PDF WebView's navigationDelegate
+/// can fire without the @MainActor PreviewViewController having to
+/// conform to WKNavigationDelegate itself (avoids Swift 6 isolation
+/// gymnastics).
+final class PDFExportNavHelper: NSObject, WKNavigationDelegate {
+    let onFinish: () -> Void
+    init(onFinish: @escaping () -> Void) {
+        self.onFinish = onFinish
+        super.init()
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        onFinish()
+    }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        previewLog.error("[pdf] offscreen didFail: \(error.localizedDescription, privacy: .public)")
+        onFinish() // fire anyway so the user sees a failure rather than a hang
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        previewLog.error("[pdf] offscreen didFailProvisional: \(error.localizedDescription, privacy: .public)")
+        onFinish()
     }
 }
 
@@ -584,34 +592,6 @@ final class PreviewNavigationHelper: NSObject, WKNavigationDelegate {
 }
 
 /// NSObject target used by `NSPrintOperation.runModal(for:delegate:didRun:contextInfo:)`.
-/// AppKit calls back via a fixed @objc selector when the print job finishes;
-/// we forward that into a Swift closure so the calling view controller can
-/// finish in idiomatic Swift.
-final class PrintCompletionHandler: NSObject {
-    private let target: URL
-    private let runStart: Date
-    private let heartbeat: DispatchSourceTimer
-    private let completion: (URL, Bool) -> Void
-
-    init(target: URL, runStart: Date, heartbeat: DispatchSourceTimer, completion: @escaping (URL, Bool) -> Void) {
-        self.target = target
-        self.runStart = runStart
-        self.heartbeat = heartbeat
-        self.completion = completion
-        super.init()
-    }
-
-    @objc func printOperationDidRun(_ printOperation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
-        heartbeat.cancel()
-        let duration = Date().timeIntervalSince(runStart)
-        os_log("[pdf] printOperationDidRun: success=%d after %.2fs", log: previewOsLog, type: .info, success ? 1 : 0, duration)
-        let exists = FileManager.default.fileExists(atPath: target.path)
-        let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
-        previewLog.notice("[pdf] printOperationDidRun: success=\(success), file exists=\(exists), size=\(size)")
-        completion(target, success && exists && size > 0)
-    }
-}
-
 final class PreviewMessageHelper: NSObject, WKScriptMessageHandler {
     weak var owner: PreviewViewController?
 

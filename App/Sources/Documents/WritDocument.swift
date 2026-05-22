@@ -255,21 +255,16 @@ final class WritDocument: NSDocument {
                     controller?.statusBar.setExportStatus(nil)
                 }
             }
-            // Optional TOC: inject into the live preview DOM, capture
-            // the export, then remove. We use a sentinel id so removal
-            // is exact even if the TOC HTML gets rewritten by KaTeX or
-            // sanitisation downstream.
-            if ExportService.includeTOC {
-                let tocHTML = TOCBuilder.render(from: self.sourceText)
-                if !tocHTML.isEmpty {
-                    controller.preview.insertPDFExportTOC(tocHTML) {
-                        controller.preview.exportPDF(to: url) {
-                            controller.preview.removePDFExportTOC()
-                        }
-                    }
-                    return
-                }
-            }
+            // Wire the optional TOC + document title into the
+            // preview's pending-export slots. The offscreen PDF
+            // pipeline picks them up directly when composing the
+            // export HTML — no DOM injection / removal dance on
+            // the live preview.
+            controller.preview.pendingExportTOC = ExportService.includeTOC
+                ? TOCBuilder.render(from: self.sourceText)
+                : nil
+            controller.preview.pendingExportTitle = self.bridge.currentParsedDocument?.frontMatter?["title"]
+                ?? (self.displayName as NSString?)?.deletingPathExtension
             controller.preview.exportPDF(to: url)
         }
     }
