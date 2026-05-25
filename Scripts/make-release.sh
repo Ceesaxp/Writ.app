@@ -105,9 +105,11 @@ tell application "Finder"
     set background picture of viewOptions to file ".background:background.png"
     -- Icon positions chosen to align with the arrow in the background
     -- image: Writ.app sits left of the arrow tail, Applications right of
-    -- the arrow head, both at the same vertical level (~y=250).
-    set position of item "Writ.app" of container window to {150, 250}
-    set position of item "Applications" of container window to {450, 250}
+    -- the arrow head, both at the same vertical level (~y=150 — one
+    -- Finder grid row above the previous y=250 so the icons sit closer
+    -- to the arrow rather than overlapping the "Drag…" caption).
+    set position of item "Writ.app" of container window to {150, 150}
+    set position of item "Applications" of container window to {450, 150}
     update without registering applications
     delay 1
     close
