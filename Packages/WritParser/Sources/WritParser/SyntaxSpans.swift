@@ -204,8 +204,8 @@ private struct Walker: MarkupWalker {
         let endLine = sourceRange.upperBound.line
         let endColumn = sourceRange.upperBound.column
 
-        // swift-markdown returns 1-indexed line/column in source-bytes; we
-        // translate to UTF-16 offsets that NSTextStorage uses.
+        // swift-markdown returns 1-indexed line/column. Columns come from
+        // cmark, which counts UTF-8 bytes; NSTextStorage uses UTF-16 units.
         let startOffset = utf16Offset(line: startLine, column: startColumn)
         let endOffset = utf16Offset(line: endLine, column: endColumn)
         guard startOffset >= 0, endOffset >= startOffset else { return nil }
@@ -213,24 +213,25 @@ private struct Walker: MarkupWalker {
     }
 
     private func utf16Offset(line: Int, column: Int) -> Int {
-        // 1-indexed line and column. Walk the UTF-16 view counting newlines.
+        // cmark reports `column` as a 1-based UTF-8 byte position within the
+        // line, while NSTextStorage indexes by UTF-16 code units. Walk
+        // unicode scalars so we can advance the column by UTF-8 byte width
+        // while accumulating the UTF-16 offset.
         var currentLine = 1
-        var currentColumn = 1
-        var offset = 0
-        let utf16 = source.utf16
-        var idx = utf16.startIndex
-        while idx < utf16.endIndex {
-            if currentLine == line && currentColumn == column { return offset }
-            if utf16[idx] == 0x0A {
-                if currentLine == line { return offset } // end of target line
+        var currentColumnBytes = 1
+        var utf16Off = 0
+        for scalar in source.unicodeScalars {
+            if currentLine == line && currentColumnBytes == column { return utf16Off }
+            if scalar == "\n" {
+                if currentLine == line { return utf16Off } // end of target line
                 currentLine += 1
-                currentColumn = 1
+                currentColumnBytes = 1
+                utf16Off += 1
             } else {
-                currentColumn += 1
+                currentColumnBytes += scalar.utf8.count
+                utf16Off += scalar.utf16.count
             }
-            idx = utf16.index(after: idx)
-            offset += 1
         }
-        return offset
+        return utf16Off
     }
 }

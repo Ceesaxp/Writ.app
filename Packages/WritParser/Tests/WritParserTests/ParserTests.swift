@@ -228,6 +228,50 @@ struct ParserTests {
         #expect(kinds.contains(.mathBlock))
     }
 
+    @Test("Span ranges align with UTF-16 when source has multibyte characters")
+    func spansMultibyteAlignment() {
+        // cmark reports columns in UTF-8 bytes; NSTextStorage uses UTF-16.
+        // Cyrillic letters are 2 UTF-8 bytes but 1 UTF-16 unit, so a naive
+        // column→UTF-16 mapping shifts later spans to the right by exactly
+        // the count of multibyte characters preceding them.
+        let src = "**XXX (пре-АБВ)**: [Watchers](https://watchers.io) tail"
+        let ns = src as NSString
+        let extractor = SyntaxSpanExtractor()
+        let spans = extractor.extract(from: src)
+
+        let strong = spans.first { $0.kind == .strong }
+        #expect(strong != nil)
+        if let r = strong?.range {
+            #expect(ns.substring(with: r) == "**XXX (пре-АБВ)**")
+        }
+
+        let link = spans.first { $0.kind == .link }
+        #expect(link != nil)
+        if let r = link?.range {
+            #expect(ns.substring(with: r) == "[Watchers](https://watchers.io)")
+        }
+    }
+
+    @Test("Span ranges align with UTF-16 across emoji (4-byte UTF-8)")
+    func spansEmojiAlignment() {
+        // A non-BMP emoji is 4 UTF-8 bytes and 2 UTF-16 units, so the
+        // bytes-vs-units skew differs from Cyrillic but must still resolve.
+        let src = "Hello 🚀 **bold** [link](https://e.x)"
+        let ns = src as NSString
+        let spans = SyntaxSpanExtractor().extract(from: src)
+
+        if let r = spans.first(where: { $0.kind == .strong })?.range {
+            #expect(ns.substring(with: r) == "**bold**")
+        } else {
+            Issue.record("expected a strong span")
+        }
+        if let r = spans.first(where: { $0.kind == .link })?.range {
+            #expect(ns.substring(with: r) == "[link](https://e.x)")
+        } else {
+            Issue.record("expected a link span")
+        }
+    }
+
     @Test("HTMLSanitizer strips script tags and event handlers")
     func sanitizer() {
         let input = """
