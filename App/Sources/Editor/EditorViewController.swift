@@ -137,6 +137,30 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             name: NSView.frameDidChangeNotification,
             object: scroll.contentView
         )
+
+        // TextKit 2 sometimes leaves a blank band below the edit point
+        // in a long document: the storage edit invalidates fragments
+        // from the cursor through end-of-doc, the line-number gutter
+        // keeps up because it walks fragments with `.ensuresLayout`,
+        // but the text view's own paint can show stale (or absent)
+        // geometry until the user scrolls. Force the viewport to
+        // relayout and the text view to redraw on every storage edit;
+        // both user keystrokes and the async syntax highlighter's
+        // attribute pass route through this notification.
+        if let storage = textView.textStorage {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleTextStorageEdit(_:)),
+                name: NSTextStorage.didProcessEditingNotification,
+                object: storage
+            )
+        }
+    }
+
+    @objc private func handleTextStorageEdit(_ note: Notification) {
+        guard let textLayoutManager = textView.textLayoutManager else { return }
+        textLayoutManager.textViewportLayoutController.layoutViewport()
+        textView.needsDisplay = true
     }
 
     @objc private func clipViewFrameDidChange(_ note: Notification) {

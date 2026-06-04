@@ -99,3 +99,68 @@ Outside the strict M0–M4 plan. Bundle into a post-MVP polish pass.
       bundled minimal TOC stylesheet; PDF export injects the same
       block into the live preview DOM via JS, prints, and removes
       it cleanly via a sentinel id.
+
+---
+
+## v0.4.8 — small polish release — **DONE 2026-06-04**
+
+- [x] **Close #22 — render front matter as document header in
+      HTML/PDF exports.** `DocumentHeaderBuilder` (new in WritRender)
+      emits the `<header class="writ-doc-header">` block. HTML export
+      adds it via `HTMLExporter.render(...)` + a `<meta name="keywords">`
+      from `tags`. PDF export injects it into the live DOM (alongside
+      a `writ-export` body class so CSS hides the dimmed FM dl) via
+      `PreviewViewController.insertPDFExportDocHeader`; cleanup on
+      `onExportFinished`. `FrontMatter.tags` now parses YAML inline /
+      YAML block / TOML quoted-array forms; malformed tags don't
+      abort. Tests in WritParser + WritRender lock both ends.
+
+- [x] **Tighten nested-list / blockquote spacing in preview CSS.**
+      Added `li > p:only-child { margin: 0 }`, `li > p:first-child`,
+      `li > p:last-child` margin collapse, tighter `ul ul`/`ol ol`
+      top margin, and `blockquote > :last-child { margin-bottom: 0 }`
+      in `Resources/preview/theme.css`. Visual only; no parser
+      changes.
+
+- [x] **Settings: PDF font scale slider (default 85%).**
+      New `ExportService.pdfFontScalePercent` (UserDefaults-backed,
+      clamped to 60–100). `PreferencesWindowController` gains a
+      tick-marked NSSlider with a live `XX %` readout. PDF export
+      injects `@media print { html { font-size: X% } }` via a style
+      element scoped to the print path; `html`-level scope cascades
+      both `rem` headings and `em` body sizes proportionally.
+
+- [x] **Editor relayout glitch after edits in scrolled documents.**
+      Diagnosed as TextKit 2's viewport layout going stale after a
+      `NSTextStorage.didProcessEditing` cycle (especially after the
+      80ms async syntax highlighter's `setAttributes`+`addAttribute`
+      pass over `fullRange`). `EditorViewController` now observes
+      `didProcessEditingNotification` on its text storage and forces
+      `textViewportLayoutController.layoutViewport()` + a
+      `needsDisplay` on every storage edit. Catches both user
+      keystrokes and the highlighter pass.
+
+## v0.5.0 — milestone scope (confirmed 2026-06-04)
+
+GitHub milestone "0.5.0" carries the post-0.4.8 issues. #11
+(workspace/project) moved to 1.0.0 — too big to gate 0.5 on.
+
+- [ ] **#22** — folded into 0.4.8 above.
+- [ ] **#21** — Autolink bare URLs (GFM-style). Small. Likely a
+      single `cmark` flag + an inline-text regex pass for cases
+      cmark misses. Verify against `http://example.com.` (trailing
+      dot must not be eaten) and Markdown autolinks `<…>` (keep
+      working).
+- [ ] **#19** — Alternative preview themes (serif / mono / sans,
+      light + dark). Larger. Needs a theme bundle layout under
+      `Resources/preview/themes/`, a Settings picker, and the JS
+      bridge to swap stylesheets without a full reload.
+- [ ] **#6** — Allow / bundle custom CSS for Preview. File-picker
+      based — user points at a `.css`, we load it after the bundled
+      theme. Should hot-reload on file change (FSEvents already in
+      the codebase for folder watching).
+
+### Deferred from 0.5.0 to 1.0.0 (2026-06-04)
+
+- **#11** — Workspace / project file combination. Scope undefined
+      and likely a feature of its own. Not gating 0.5.

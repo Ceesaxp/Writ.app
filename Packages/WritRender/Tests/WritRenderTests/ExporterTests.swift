@@ -103,4 +103,76 @@ struct ExporterTests {
         #expect(!html.contains("writ-toc"), "no TOC requested → no TOC in output")
         #expect(html.contains("Just one"), "body still renders")
     }
+
+    /// Closes #22: HTML export emits a `<header class="writ-doc-header">`
+    /// block when front matter carries any recognised field, with
+    /// `<meta name="keywords">` for tags. The body still contains the
+    /// existing `.writ-front-matter` dl card — CSS on `body.writ-export`
+    /// is what hides it from the rendered output, not the markup.
+    @Test("HTML export emits document header when FM has title/author/date")
+    func docHeaderRendered() throws {
+        let src = """
+        ---
+        title: Quarterly Review
+        author: Andrei
+        date: 2026-06-04
+        description: A look back at Q2.
+        tags: [planning, review]
+        ---
+
+        Body text.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let html = HTMLExporter.render(parsed: parsed, theme: "light", css: "")
+
+        #expect(html.contains("writ-doc-header"))
+        #expect(html.contains("Quarterly Review"))
+        #expect(html.contains("Andrei"))
+        #expect(html.contains("2026-06-04"))
+        #expect(html.contains("A look back at Q2."))
+        #expect(html.contains("data-writ-tags=\"planning,review\""))
+        #expect(html.contains("<meta name=\"keywords\" content=\"planning, review\">"))
+
+        // Header must sit ahead of the body content.
+        let headerRange = try #require(html.range(of: "writ-doc-header"))
+        let bodyRange = try #require(html.range(of: "Body text."))
+        #expect(headerRange.lowerBound < bodyRange.lowerBound)
+    }
+
+    @Test("No document header when FM lacks every recognised field")
+    func docHeaderSuppressed() throws {
+        let src = """
+        ---
+        audience: internal
+        confidentiality: high
+        ---
+
+        body
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let html = HTMLExporter.render(parsed: parsed, theme: "light", css: "")
+        #expect(!html.contains("writ-doc-header"))
+        // The dimmed FM dl still ships in the body — CSS would hide it
+        // if `writ-export` had a doc-header to replace it with.
+        #expect(html.contains("writ-front-matter"))
+    }
+
+    @Test("Document header tolerates date_created in place of date")
+    func docHeaderDateCreatedAlias() throws {
+        let src = """
+        ---
+        title: T
+        date_created: 2026-01-01
+        ---
+
+        body
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let html = HTMLExporter.render(parsed: parsed, theme: "light", css: "")
+        #expect(html.contains("writ-doc-header"))
+        #expect(html.contains("2026-01-01"))
+    }
 }

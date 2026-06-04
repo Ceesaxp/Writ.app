@@ -73,6 +73,14 @@ a:hover { text-decoration: underline; }
 
 ul, ol { padding-left: 1.6em; margin: 0 0 1em; }
 li { margin: 0.18em 0; }
+/* CommonMark wraps each <li> in a <p> when the list is "loose" (a blank
+   line separates items or precedes a sublist). The <p>'s 1em bottom
+   margin then doubles the rhythm. Collapse that inner margin so loose
+   lists read at the same density as tight ones. */
+li > p:only-child { margin: 0; }
+li > p:first-child { margin-top: 0; }
+li > p:last-child { margin-bottom: 0; }
+ul ul, ul ol, ol ul, ol ol { margin: 0.2em 0 0.2em; }
 .task-list-item { list-style: none; margin-left: -1.4em; }
 .task-list-item input { margin-right: 0.4em; }
 
@@ -83,6 +91,7 @@ blockquote {
   color: var(--writ-blockquote-fg);
   background: var(--writ-bg-alt);
 }
+blockquote > :last-child { margin-bottom: 0; }
 
 hr { border: 0; border-top: 1px solid var(--writ-border); margin: 2em 0; }
 
@@ -127,6 +136,40 @@ hr { border: 0; border-top: 1px solid var(--writ-border); margin: 2em 0; }
   border: 0;
   background: transparent;
 }
+
+/* Export-only document header. HTML and PDF exports get an
+   academic-style block above the body (title + author · date +
+   description). The preview keeps the dimmed front-matter card; in
+   export mode we hide the card so the header is the single canonical
+   document title. `body.writ-export` is the gate — set by HTMLExporter
+   and by the PDF print path. */
+.writ-doc-header {
+  margin: 0 0 2em;
+  padding: 0 0 1em;
+}
+.writ-doc-title {
+  margin: 0 0 0.3em;
+  font-size: 1.9rem;
+  line-height: 1.2;
+  font-weight: 700;
+  border: 0;
+  padding: 0;
+}
+.writ-doc-meta {
+  margin: 0 0 0.3em;
+  color: var(--writ-fg-muted);
+  font-size: 0.92em;
+}
+.writ-doc-description {
+  margin: 0 0 0.5em;
+  font-style: italic;
+  color: var(--writ-fg-muted);
+}
+.writ-doc-header hr {
+  margin: 0.6em 0 0;
+  border-top: 1px solid var(--writ-border);
+}
+body.writ-export .writ-front-matter { display: none; }
 
 /* GFM alerts — `> [!NOTE]` etc. Five types, each with its own colour
    ramp. The icon inherits `currentColor` so it picks up the type-tint

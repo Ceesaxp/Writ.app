@@ -18,10 +18,12 @@ final class PreferencesWindowController: NSWindowController {
     private let tocCheckbox = NSButton(checkboxWithTitle: "Include table of contents in HTML / PDF export", target: nil, action: nil)
     private let fontPopup = NSPopUpButton()
     private let paperSizePopup = NSPopUpButton()
+    private let pdfFontScaleSlider = NSSlider(value: 85, minValue: 60, maxValue: 100, target: nil, action: nil)
+    private let pdfFontScaleValueLabel = NSTextField(labelWithString: "85 %")
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 410),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 450),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -95,6 +97,23 @@ final class PreferencesWindowController: NSWindowController {
             paperSizePopup.lastItem?.representedObject = size.rawValue
         }
 
+        let pdfFontScaleLabel = NSTextField(labelWithString: "PDF font scale:")
+        pdfFontScaleLabel.translatesAutoresizingMaskIntoConstraints = false
+        pdfFontScaleLabel.font = NSFont.systemFont(ofSize: 13)
+
+        pdfFontScaleSlider.translatesAutoresizingMaskIntoConstraints = false
+        pdfFontScaleSlider.isContinuous = true
+        pdfFontScaleSlider.numberOfTickMarks = 9   // 60, 65, 70, …, 100
+        pdfFontScaleSlider.allowsTickMarkValuesOnly = true
+        pdfFontScaleSlider.tickMarkPosition = .below
+        pdfFontScaleSlider.target = self
+        pdfFontScaleSlider.action = #selector(pdfFontScaleChanged(_:))
+
+        pdfFontScaleValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        pdfFontScaleValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        pdfFontScaleValueLabel.textColor = .secondaryLabelColor
+        pdfFontScaleValueLabel.alignment = .right
+
         let resetButton = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults(_:)))
         resetButton.translatesAutoresizingMaskIntoConstraints = false
         resetButton.bezelStyle = .rounded
@@ -114,6 +133,9 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(fontPopup)
         contentView.addSubview(paperSizeLabel)
         contentView.addSubview(paperSizePopup)
+        contentView.addSubview(pdfFontScaleLabel)
+        contentView.addSubview(pdfFontScaleSlider)
+        contentView.addSubview(pdfFontScaleValueLabel)
         contentView.addSubview(resetButton)
 
         let row1Y = contentView.bottomAnchor
@@ -176,7 +198,19 @@ final class PreferencesWindowController: NSWindowController {
             paperSizePopup.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
             paperSizePopup.widthAnchor.constraint(equalToConstant: 220),
 
-            resetButton.topAnchor.constraint(equalTo: paperSizeLabel.bottomAnchor, constant: 16),
+            pdfFontScaleLabel.topAnchor.constraint(equalTo: paperSizeLabel.bottomAnchor, constant: 14),
+            pdfFontScaleLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            pdfFontScaleLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            pdfFontScaleSlider.centerYAnchor.constraint(equalTo: pdfFontScaleLabel.centerYAnchor),
+            pdfFontScaleSlider.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            pdfFontScaleSlider.widthAnchor.constraint(equalToConstant: 170),
+
+            pdfFontScaleValueLabel.centerYAnchor.constraint(equalTo: pdfFontScaleLabel.centerYAnchor),
+            pdfFontScaleValueLabel.leadingAnchor.constraint(equalTo: pdfFontScaleSlider.trailingAnchor, constant: 8),
+            pdfFontScaleValueLabel.widthAnchor.constraint(equalToConstant: 48),
+
+            resetButton.topAnchor.constraint(equalTo: pdfFontScaleLabel.bottomAnchor, constant: 16),
             resetButton.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor)
         ])
         _ = row1Y
@@ -203,6 +237,10 @@ final class PreferencesWindowController: NSWindowController {
             ($0.representedObject as? String) == paperRaw
         }
         paperSizePopup.selectItem(at: paperMatch ?? 0)
+
+        let scale = ExportService.pdfFontScalePercent
+        pdfFontScaleSlider.integerValue = scale
+        pdfFontScaleValueLabel.stringValue = "\(scale) %"
     }
 
     @objc private func fontFamilyChanged(_ sender: NSPopUpButton) {
@@ -213,6 +251,12 @@ final class PreferencesWindowController: NSWindowController {
         guard let raw = sender.selectedItem?.representedObject as? String,
               let size = ExportService.PDFPaperSize(rawValue: raw) else { return }
         ExportService.pdfPaperSize = size
+    }
+
+    @objc private func pdfFontScaleChanged(_ sender: NSSlider) {
+        let value = sender.integerValue
+        ExportService.pdfFontScalePercent = value
+        pdfFontScaleValueLabel.stringValue = "\(value) %"
     }
 
     @objc private func fieldDidCommit(_ sender: NSTextField) {
@@ -239,6 +283,7 @@ final class PreferencesWindowController: NSWindowController {
         EditorViewController.selectedFontFamily = nil
         ExportService.includeTOC = false
         ExportService.pdfPaperSize = .usLetter
+        ExportService.pdfFontScalePercent = ExportService.pdfFontScalePercentDefault
         loadFromDefaults()
     }
 }

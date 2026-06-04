@@ -261,6 +261,13 @@ final class WritDocument: NSDocument {
             controller.preview.pendingExportTOC = ExportService.includeTOC
                 ? TOCBuilder.render(from: self.sourceText)
                 : nil
+            // Front-matter document header (closes #22) — only injected
+            // when the FM carries at least one of title / author / date /
+            // description. Without that, the live preview keeps its
+            // dimmed FM card in the PDF too.
+            let frontMatter = self.bridge.currentParsedDocument?.frontMatter
+            controller.preview.pendingExportDocHeader =
+                DocumentHeaderBuilder.render(frontMatter: frontMatter)?.html
             controller.preview.exportPDF(to: url)
         }
     }

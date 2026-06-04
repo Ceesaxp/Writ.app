@@ -384,6 +384,80 @@ struct ParserTests {
         #expect(fm["author"] == "Andrei")
     }
 
+    @Test("Front-matter tags: YAML inline array")
+    func frontMatterTagsYAMLInline() throws {
+        let src = """
+        ---
+        title: Hello
+        tags: [alpha, beta, gamma]
+        ---
+
+        body
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let fm = try #require(parsed.frontMatter)
+        #expect(fm.tags == ["alpha", "beta", "gamma"])
+    }
+
+    @Test("Front-matter tags: YAML block sequence")
+    func frontMatterTagsYAMLBlock() throws {
+        let src = """
+        ---
+        title: Hello
+        tags:
+          - alpha
+          - "beta gamma"
+          - delta
+        author: A
+        ---
+
+        body
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let fm = try #require(parsed.frontMatter)
+        #expect(fm.tags == ["alpha", "beta gamma", "delta"])
+        // The next non-list line terminates the block — `author` still parses.
+        #expect(fm["author"] == "A")
+    }
+
+    @Test("Front-matter tags: TOML quoted array")
+    func frontMatterTagsTOML() throws {
+        let src = """
+        +++
+        title = "Hello"
+        tags = ["alpha", "beta", "gamma"]
+        +++
+
+        body
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let fm = try #require(parsed.frontMatter)
+        #expect(fm.tags == ["alpha", "beta", "gamma"])
+    }
+
+    @Test("Front-matter tags: malformed input does not abort the parse")
+    func frontMatterTagsMalformed() throws {
+        let src = """
+        ---
+        title: Hello
+        tags: [unclosed, list
+        author: A
+        ---
+
+        body
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        let fm = try #require(parsed.frontMatter)
+        // The `[unclosed, list` value isn't a recognisable array — kept
+        // as the raw value of `tags`; the parser does NOT fall over.
+        #expect(fm["title"] == "Hello")
+        #expect(fm["author"] == "A")
+    }
+
     @Test("Quoted YAML values lose their surrounding quotes")
     func frontMatterQuoteStripping() throws {
         let src = """

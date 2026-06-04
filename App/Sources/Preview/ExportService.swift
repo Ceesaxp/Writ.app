@@ -47,6 +47,25 @@ enum ExportService {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: pdfPaperSizeDefaultsKey) }
     }
 
+    /// PDF font scale (% of HTML base). Screen preview is sized for
+    /// reading on a Mac; on paper that density reads loose, so the
+    /// default trims it to 85%. Clamp to [60, 100]; 100 means "same as
+    /// preview, skip the print stylesheet entirely".
+    static let pdfFontScalePercentDefaultsKey = "WritPDFFontScalePercent"
+    static let pdfFontScalePercentDefault = 85
+    static var pdfFontScalePercent: Int {
+        get {
+            guard let stored = UserDefaults.standard.object(forKey: pdfFontScalePercentDefaultsKey) as? Int else {
+                return pdfFontScalePercentDefault
+            }
+            return min(100, max(60, stored))
+        }
+        set {
+            let clamped = min(100, max(60, newValue))
+            UserDefaults.standard.set(clamped, forKey: pdfFontScalePercentDefaultsKey)
+        }
+    }
+
     /// Captures the live preview DOM (already-rendered math, Mermaid, etc.),
     /// wraps it with the bundled CSS, and writes the result to `url`. Falls
     /// back to the parser output if the preview can't be captured.
@@ -58,10 +77,20 @@ enum ExportService {
         //   - github.css  highlight.js colour scheme for code blocks
         let css = bundledCSS() + "\n" + katexCSS() + "\n" + highlightCSS() + "\n" + tocCSS()
         let toc = includeTOC ? TOCBuilder.render(from: source) : ""
+        let header = DocumentHeaderBuilder.render(frontMatter: parsed?.frontMatter)
+        let title = parsed?.frontMatter?["title"] ?? "Writ Export"
         preview.capturedContentHTML { captured in
             let html: String
             if let captured, !captured.isEmpty {
-                html = HTMLExporter.render(body: captured, theme: theme, css: css, toc: toc)
+                html = HTMLExporter.render(
+                    body: captured,
+                    theme: theme,
+                    css: css,
+                    toc: toc,
+                    title: title,
+                    docHeader: header?.html ?? "",
+                    tags: header?.tags ?? []
+                )
             } else {
                 html = HTMLExporter.render(parsed: parsed, theme: theme, css: css, toc: toc)
             }

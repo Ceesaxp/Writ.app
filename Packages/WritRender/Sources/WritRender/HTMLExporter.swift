@@ -11,24 +11,34 @@ public enum HTMLExporter {
         // browser tab / OS preview shows the document name rather
         // than the generic "Writ Export" placeholder.
         let title = parsed?.frontMatter?["title"] ?? "Writ Export"
-        return render(body: body, theme: theme, css: css, toc: toc, title: title)
+        let header = DocumentHeaderBuilder.render(frontMatter: parsed?.frontMatter)
+        return render(body: body, theme: theme, css: css, toc: toc, title: title, docHeader: header?.html ?? "", tags: header?.tags ?? [])
     }
 
-    public static func render(body: String, theme: String, css: String, toc: String = "", title: String = "Writ Export") -> String {
+    public static func render(
+        body: String,
+        theme: String,
+        css: String,
+        toc: String = "",
+        title: String = "Writ Export",
+        docHeader: String = "",
+        tags: [String] = []
+    ) -> String {
         let escapedTitle = escapeHTML(title)
+        let keywordsMeta = tags.isEmpty ? "" : "\n<meta name=\"keywords\" content=\"\(escapeHTML(tags.joined(separator: ", ")))\">"
         return """
         <!DOCTYPE html>
         <html lang="en">
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>\(escapedTitle)</title>
+        <title>\(escapedTitle)</title>\(keywordsMeta)
         <style>\n\(css)\n</style>
         </head>
         <body class="writ-export writ-theme-\(theme)">
         <main id="writ-content">
         \(toc)
-        \(body)
+        \(docHeader)\(body)
         </main>
         </body>
         </html>

@@ -276,6 +276,15 @@ final class PreviewViewController: NSViewController {
     /// sees the result.
     var pendingExportTOC: String?
 
+    /// Optional document-header HTML (`<header class="writ-doc-header">…`)
+    /// to prepend to the live preview before printing. Set by
+    /// `WritDocument.exportPDF` when front matter carries any of
+    /// title / author / date / description. When present, the export
+    /// also flips `body.writ-export` so the bundled CSS hides the
+    /// dimmed `<dl class="writ-front-matter">` card for the duration
+    /// of the print. Both are torn down on completion.
+    var pendingExportDocHeader: String?
+
     func exportPDF(to url: URL, then: (() -> Void)? = nil) {
         // The user-supplied `then` runs first on completion, then any
         // pre-existing `onExportFinished`, and finally the handler is
@@ -283,23 +292,46 @@ final class PreviewViewController: NSViewController {
         // other.
         let originalOnFinished = onExportFinished
         let toc = (pendingExportTOC?.isEmpty == false) ? pendingExportTOC : nil
-        // Wrap the completion so it (a) clears the injected TOC from
-        // the live preview, (b) runs the caller's `then`, (c) restores
-        // the original `onExportFinished`. Always wrapped — even when
-        // no TOC was injected — so the `then`/restore wiring is uniform.
+        let docHeader = (pendingExportDocHeader?.isEmpty == false) ? pendingExportDocHeader : nil
+        let fontScale = ExportService.pdfFontScalePercent
+        let needsFontScale = fontScale != 100
+        // Wrap the completion so it tears down every injected block in
+        // reverse-creation order, runs the caller's `then`, then
+        // restores the original `onExportFinished`. Always wrapped —
+        // even when nothing was injected — so the `then`/restore wiring
+        // is uniform.
         onExportFinished = { [weak self] finishedURL, ok in
+            if needsFontScale { self?.removePDFExportFontScale() }
+            if docHeader != nil { self?.removePDFExportDocHeader() }
             if toc != nil { self?.removePDFExportTOC() }
             then?()
             originalOnFinished?(finishedURL, ok)
             self?.onExportFinished = originalOnFinished
             self?.pendingExportTOC = nil
+            self?.pendingExportDocHeader = nil
+        }
+        // Compose the pre-print pipeline back-to-front: each stage
+        // calls the next one in its completion handler.
+        let runExport: () -> Void = { [weak self] in self?.exportPDFImpl(to: url) }
+        let afterFontScale: () -> Void = runExport
+        let afterDocHeader: () -> Void = { [weak self] in
+            if needsFontScale {
+                self?.insertPDFExportFontScale(fontScale, completion: afterFontScale)
+            } else {
+                afterFontScale()
+            }
+        }
+        let afterTOC: () -> Void = { [weak self] in
+            if let docHeader {
+                self?.insertPDFExportDocHeader(docHeader, completion: afterDocHeader)
+            } else {
+                afterDocHeader()
+            }
         }
         if let toc {
-            insertPDFExportTOC(toc) { [weak self] in
-                self?.exportPDFImpl(to: url)
-            }
+            insertPDFExportTOC(toc, completion: afterTOC)
         } else {
-            exportPDFImpl(to: url)
+            afterTOC()
         }
     }
 
@@ -327,6 +359,72 @@ final class PreviewViewController: NSViewController {
         let js = """
             (function(){
               var el = document.getElementById('writ-export-toc');
+              if (el && el.parentNode) el.parentNode.removeChild(el);
+            })()
+            """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    /// Inserts the export-only `<header class="writ-doc-header">` block
+    /// above all content inside `#writ-content` AND flips
+    /// `body.writ-export` so the bundled CSS hides the dimmed
+    /// `<dl class="writ-front-matter">` card. Both are torn down by
+    /// `removePDFExportDocHeader()` after the print operation finishes.
+    private func insertPDFExportDocHeader(_ headerHTML: String, completion: @escaping () -> Void) {
+        let escaped = headerHTML
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "`", with: "\\`")
+        let js = """
+            (function(){
+              var root = document.getElementById('writ-content');
+              if (!root) return;
+              var prior = document.getElementById('writ-export-doc-header');
+              if (prior && prior.parentNode) prior.parentNode.removeChild(prior);
+              var holder = document.createElement('div');
+              holder.id = 'writ-export-doc-header';
+              holder.innerHTML = `\(escaped)`;
+              root.insertBefore(holder, root.firstChild);
+              document.body.classList.add('writ-export');
+            })()
+            """
+        webView.evaluateJavaScript(js) { _, _ in completion() }
+    }
+
+    private func removePDFExportDocHeader() {
+        let js = """
+            (function(){
+              var el = document.getElementById('writ-export-doc-header');
+              if (el && el.parentNode) el.parentNode.removeChild(el);
+              document.body.classList.remove('writ-export');
+            })()
+            """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    /// Injects a `@media print { html { font-size: <pct>% } }` style tag
+    /// so the WKWebView print path scales body + heading rhythm down to
+    /// the user's PDF density preference. `html` is the right scope:
+    /// headings sized in `rem` follow the root, and `em`-based child
+    /// rules cascade from `body`.
+    private func insertPDFExportFontScale(_ percent: Int, completion: @escaping () -> Void) {
+        let clamped = min(100, max(60, percent))
+        let js = """
+            (function(){
+              var prior = document.getElementById('writ-export-font-scale');
+              if (prior && prior.parentNode) prior.parentNode.removeChild(prior);
+              var style = document.createElement('style');
+              style.id = 'writ-export-font-scale';
+              style.textContent = '@media print { html { font-size: \(clamped)% } }';
+              document.head.appendChild(style);
+            })()
+            """
+        webView.evaluateJavaScript(js) { _, _ in completion() }
+    }
+
+    private func removePDFExportFontScale() {
+        let js = """
+            (function(){
+              var el = document.getElementById('writ-export-font-scale');
               if (el && el.parentNode) el.parentNode.removeChild(el);
             })()
             """
