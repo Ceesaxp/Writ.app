@@ -276,6 +276,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         editor.insertMermaidBlock()
     }
 
+    @objc func insertFrontMatterMenu(_ sender: Any?) {
+        editor.insertFrontMatter()
+    }
+
     @objc func toggleLineNumbers(_ sender: Any?) {
         editor.toggleLineNumbers()
     }

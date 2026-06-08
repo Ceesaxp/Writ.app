@@ -201,6 +201,34 @@ compounding fixes.
       selection, insert pair at cursor, smart-skip closer, apostrophe
       inside a word) work correctly under repeated Cmd-Z.
 
+---
+
+## v0.4.10 — front-matter quality of life — **DONE 2026-06-08**
+
+First of three staged drops toward the 0.5.0 milestone. Closes the
+two front-matter issues filed alongside the v0.4.8 testing.
+
+- [x] **Close #25 — insert front-matter shortcut.** New `Insert →
+      Front Matter` menu item (⌥⌘Y) inserts a YAML template at the
+      top of the document with `title`, `author`, and `date_created`
+      fields (date pre-filled with today). The caret lands right
+      after `title: ` so the user can start typing immediately.
+      No-op if the document already has a front-matter block —
+      uses `FrontMatterExtractor.extract` so the detection matches
+      the renderer's view byte-for-byte. Implemented as
+      `EditorViewController.insertFrontMatter()` wired through
+      `DocumentWindowController.insertFrontMatterMenu(_:)`.
+
+- [x] **Close #26 — no auto-pair inside front matter.** When the
+      cursor sits inside the front-matter block, the markdown-only
+      auto-pairs (`*`, `_`, `` ` ``, `$`) no longer balance —
+      they're literal characters in YAML/TOML. Brackets and quotes
+      (`(`, `[`, `{`, `"`, `'`) still pair because they're real
+      YAML/TOML syntax for arrays, inline objects, and quoted
+      values. Gated in `WritTextView.insertText` via the new
+      `selectionIsInFrontMatter(selection:)` helper, which reuses
+      `FrontMatterExtractor` for boundary detection.
+
 ## v0.5.0 — milestone scope (confirmed 2026-06-04)
 
 GitHub milestone "0.5.0" carries the post-0.4.8 issues. #11

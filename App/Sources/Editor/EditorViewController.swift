@@ -465,6 +465,27 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         textView.setSelectedRange(plan.placeholderRange)
     }
 
+    /// Inserts a YAML front-matter template at the top of the document
+    /// with `title`, `author`, and `date_created` keys (date filled
+    /// with today's date). The caret lands right after `title: ` so
+    /// the user can start typing immediately. No-op if the document
+    /// already has a front-matter block.
+    func insertFrontMatter() {
+        if FrontMatterExtractor.extract(textView.string) != nil { return }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone.current
+        let today = formatter.string(from: Date())
+        let template = "---\ntitle: \nauthor: \ndate_created: \(today)\n---\n\n"
+        let topRange = NSRange(location: 0, length: 0)
+        textView.insertText(template, replacementRange: topRange)
+        // Position the caret after the `title: ` label so typing the
+        // title is the user's next action.
+        let caret = ("---\ntitle: " as NSString).length
+        textView.setSelectedRange(NSRange(location: caret, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+    }
+
     /// Accumulator for character-edit ranges between highlight passes.
     /// The highlighter is debounced 80 ms — multiple keystrokes can
     /// land in that window. We pass the union to the highlighter so it

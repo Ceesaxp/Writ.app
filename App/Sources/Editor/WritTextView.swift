@@ -1,4 +1,5 @@
 import Cocoa
+import WritParser
 
 /// NSTextView subclass that paints a full-width background behind
 /// fenced code-block ranges, addressing the limitation that
@@ -58,6 +59,14 @@ final class WritTextView: NSTextView {
         ("*", "*"), ("_", "_"), ("`", "`"), ("$", "$")
     ]
 
+    /// Markdown-formatting characters whose auto-pair behavior should
+    /// be suppressed inside a front-matter block. `*` and `_` carry
+    /// meaning in YAML (anchors, aliases) and TOML values; `` ` ``
+    /// and `$` are markdown-only constructs that just confuse front
+    /// matter. Brackets and quotes stay paired — they're legitimate
+    /// YAML/TOML syntax for arrays, inline objects, and quoted values.
+    private static let markdownOnlyAutoPairs: Set<String> = ["*", "_", "`", "$"]
+
     override func insertText(_ string: Any, replacementRange: NSRange) {
         let typed: String
         if let s = string as? String {
@@ -74,6 +83,14 @@ final class WritTextView: NSTextView {
         }
         let selection = selectedRange()
         let docNS = self.string as NSString
+
+        // Suppress markdown-only auto-pairs when the cursor sits inside
+        // the front-matter block. `*foo*` etc. is not emphasis there.
+        if WritTextView.markdownOnlyAutoPairs.contains(pair.open),
+           selectionIsInFrontMatter(selection: selection) {
+            super.insertText(string, replacementRange: replacementRange)
+            return
+        }
 
         // Selection present: wrap it with the pair as a single edit
         // (one `super.insertText` call → one shouldChangeText cycle
@@ -123,6 +140,22 @@ final class WritTextView: NSTextView {
             length: 0
         )
         setSelectedRange(between)
+    }
+
+    /// True when the (collapsed or extended) selection sits entirely
+    /// inside the YAML/TOML front-matter block at the top of the
+    /// document. Uses `FrontMatterExtractor` so the editor and the
+    /// renderer agree byte-for-byte on what counts as front matter.
+    /// `FrontMatter.charCount` is in `Character` units; convert via
+    /// the source's UTF-16 prefix to compare against `selectedRange()`
+    /// which is in UTF-16 code units.
+    private func selectionIsInFrontMatter(selection: NSRange) -> Bool {
+        let source = self.string
+        guard let (fm, _) = FrontMatterExtractor.extract(source) else { return false }
+        let prefix = source.prefix(fm.charCount)
+        let fmUTF16Length = (String(prefix) as NSString).length
+        let selectionEnd = selection.location + selection.length
+        return selection.location < fmUTF16Length && selectionEnd <= fmUTF16Length
     }
 
     override func drawBackground(in rect: NSRect) {

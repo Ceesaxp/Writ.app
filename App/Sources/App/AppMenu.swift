@@ -111,6 +111,10 @@ enum AppMenu {
         let insertMermaid = NSMenuItem(title: "Mermaid Diagram", action: #selector(DocumentWindowController.insertMermaidBlockMenu(_:)), keyEquivalent: "d")
         insertMermaid.keyEquivalentModifierMask = [.command, .option]
         insertMenu.addItem(insertMermaid)
+        insertMenu.addItem(.separator())
+        let insertFM = NSMenuItem(title: "Front Matter", action: #selector(DocumentWindowController.insertFrontMatterMenu(_:)), keyEquivalent: "y")
+        insertFM.keyEquivalentModifierMask = [.command, .option]
+        insertMenu.addItem(insertFM)
 
         // Format menu — Markdown formatting shortcuts. Actions live on
         // EditorViewController and are picked up via the responder chain
