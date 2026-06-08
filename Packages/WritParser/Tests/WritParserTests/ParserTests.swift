@@ -609,4 +609,111 @@ struct ParserTests {
         #expect(p.html.contains("text-align:center"))
         #expect(p.html.contains("text-align:right"))
     }
+
+    // MARK: - Emoji shortcodes (#16)
+
+    @Test("Emoji shortcode: known tokens substitute to glyphs")
+    func emojiSubstitutesKnown() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Ship it :rocket: with :sparkles:!")
+        let p = try parser.parse(s)
+        #expect(p.html.contains("🚀"))
+        #expect(p.html.contains("✨"))
+        #expect(!p.html.contains(":rocket:"))
+        #expect(!p.html.contains(":sparkles:"))
+    }
+
+    @Test("Emoji shortcode: unknown tokens stay literal")
+    func emojiUnknownTokensLiteral() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Edge case :not_a_real_emoji: stays.")
+        let p = try parser.parse(s)
+        #expect(p.html.contains(":not_a_real_emoji:"))
+    }
+
+    @Test("Emoji shortcode: inside inline code, stays literal")
+    func emojiInsideInlineCode() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "use the `:rocket:` shortcode")
+        let p = try parser.parse(s)
+        // The `<code>:rocket:</code>` literal must survive.
+        #expect(p.html.contains("<code>:rocket:</code>"))
+        // Body text outside the code span did not have a shortcode to
+        // substitute, so no rocket glyph should appear anywhere.
+        #expect(!p.html.contains("🚀"))
+    }
+
+    @Test("Emoji shortcode: inside a fenced code block, stays literal")
+    func emojiInsideCodeBlock() throws {
+        let src = """
+        ```
+        :rocket: do not transform
+        ```
+        """
+        let s = DocumentSnapshot(revision: .zero, source: src)
+        let p = try parser.parse(s)
+        #expect(p.html.contains(":rocket: do not transform"))
+        #expect(!p.html.contains("🚀"))
+    }
+
+    @Test("Emoji shortcode: +1 / -1 aliases work")
+    func emojiPlusMinusAliases() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Feedback: :+1: or :-1:")
+        let p = try parser.parse(s)
+        #expect(p.html.contains("👍"))
+        #expect(p.html.contains("👎"))
+    }
+
+    // MARK: - Autolink bare URLs (#21)
+
+    @Test("Autolink: https URL becomes a link")
+    func autolinkHTTPS() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Visit https://example.com today.")
+        let p = try parser.parse(s)
+        #expect(p.html.contains("<a href=\"https://example.com\">https://example.com</a>"))
+    }
+
+    @Test("Autolink: trailing punctuation is not part of the link")
+    func autolinkTrailingPunctuation() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "See https://foo.com. Done.")
+        let p = try parser.parse(s)
+        // The trailing period stays outside the anchor.
+        #expect(p.html.contains("<a href=\"https://foo.com\">https://foo.com</a>"))
+        #expect(!p.html.contains("https://foo.com.\""))
+    }
+
+    @Test("Autolink: www. host prepends http:// scheme")
+    func autolinkWWWPrefix() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Try www.example.com next.")
+        let p = try parser.parse(s)
+        #expect(p.html.contains("<a href=\"http://www.example.com\">www.example.com</a>"))
+    }
+
+    @Test("Autolink: URL inside backticks stays literal")
+    func autolinkInsideInlineCode() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Use `https://example.com` literally.")
+        let p = try parser.parse(s)
+        // Inside <code>, the URL is escaped text, not an anchor.
+        #expect(p.html.contains("<code>https://example.com</code>"))
+        // Make sure we didn't accidentally also emit an anchor.
+        #expect(!p.html.contains("<a href=\"https://example.com\""))
+    }
+
+    @Test("Autolink: URL inside an existing link does not double-link")
+    func autolinkInsideExistingLink() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "[click https://example.com here](https://elsewhere.com)")
+        let p = try parser.parse(s)
+        // Outer <a> points at /elsewhere.com.
+        #expect(p.html.contains("href=\"https://elsewhere.com\""))
+        // The bare URL inside the link's display text should NOT be
+        // wrapped in another <a> — searching for the nested anchor
+        // signature would catch a regression.
+        #expect(!p.html.contains("<a href=\"https://example.com\""))
+    }
+
+    @Test("Autolink: balances trailing close-paren")
+    func autolinkBalancedParen() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Reference (see https://foo.com).")
+        let p = try parser.parse(s)
+        // The trailing `)` belongs to the wrapping parens, not the URL.
+        #expect(p.html.contains("<a href=\"https://foo.com\">https://foo.com</a>"))
+        #expect(!p.html.contains("foo.com)"))
+    }
 }

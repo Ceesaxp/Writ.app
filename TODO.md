@@ -229,6 +229,35 @@ two front-matter issues filed alongside the v0.4.8 testing.
       `selectionIsInFrontMatter(selection:)` helper, which reuses
       `FrontMatterExtractor` for boundary detection.
 
+---
+
+## v0.4.11 — render-side post-processors — **DONE 2026-06-08**
+
+Second of three staged drops toward 0.5.0. Two render-side
+transformations of inline text nodes, both implemented in the new
+`InlineTextTransform` helper in WritParser. They run only on `Text`
+AST nodes inside the HTML emitter, so they don't touch source.
+
+- [x] **Close #16 — emoji shortcodes (`:tada:` → 🎉).** Curated
+      static dictionary of ~200 GitHub-style emoji shortcodes lives in
+      `EmojiShortcodes.swift`. Scanner finds `:name:` tokens in `Text`
+      content, looks up in the table, replaces matched ones with the
+      glyph; unknown tokens pass through verbatim (no warning). `+1`
+      / `-1` aliases included. Skipped for `Text` inside
+      `InlineCode` / `CodeBlock` because those go through different
+      emitter cases.
+
+- [x] **Close #21 — autolink bare URLs (GFM-style).**
+      `AutolinkExtractor.scan` walks text for `https?://…` and
+      `www.…` URL patterns; the emitter wraps each match in
+      `<a href="…">…</a>`. Trailing `.`, `,`, `;`, `:`, `!`, `?` are
+      trimmed from the link's text; unbalanced trailing `)` is
+      stripped so "(see https://foo.com)" keeps the closing paren
+      outside the link. `www.` hosts get an `http://` prefix in the
+      `href`. Suppressed when emitting inside an existing `Link` to
+      avoid double-linking (tracked via `insideLink` state on the
+      emitter).
+
 ## v0.5.0 — milestone scope (confirmed 2026-06-04)
 
 GitHub milestone "0.5.0" carries the post-0.4.8 issues. #11

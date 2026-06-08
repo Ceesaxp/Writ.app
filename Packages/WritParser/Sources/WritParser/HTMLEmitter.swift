@@ -17,6 +17,11 @@ struct HTMLEmitter: MarkupWalker {
     private var blockCounter = 0
     private let mathBlocks: [MathPreprocessor.Extracted]
     private let frontMatter: FrontMatter?
+    /// Tracks whether the current `emitInline` recursion is inside a
+    /// `Link` node. Used to suppress autolink transformation on Text
+    /// children so we don't double-link the same span (the parent
+    /// `<a>` already wraps them).
+    private var insideLink = false
 
     init(mathBlocks: [MathPreprocessor.Extracted], frontMatter: FrontMatter? = nil) {
         self.mathBlocks = mathBlocks
@@ -225,7 +230,16 @@ struct HTMLEmitter: MarkupWalker {
     private mutating func emitInline(_ markup: any Markup) {
         switch markup {
         case let text as Text:
-            out.append(escape(text.string))
+            // Post-process the text: substitute `:shortcode:` emoji
+            // and autolink bare URLs. Autolinking is suppressed when
+            // we're inside a `Link` already (`insideLink == true`) so
+            // we don't double-wrap.
+            InlineTextTransform.emit(
+                text: text.string,
+                allowAutolink: !insideLink,
+                into: &out,
+                escape: escape
+            )
         case let em as Emphasis:
             out.append("<em>")
             for child in em.children { emitInline(child) }
@@ -243,7 +257,10 @@ struct HTMLEmitter: MarkupWalker {
         case let link as Link:
             let dest = escape(link.destination ?? "")
             out.append("<a href=\"\(dest)\">")
+            let priorInsideLink = insideLink
+            insideLink = true
             for child in link.children { emitInline(child) }
+            insideLink = priorInsideLink
             out.append("</a>")
         case let image as Image:
             let src = escape(image.source ?? "")
