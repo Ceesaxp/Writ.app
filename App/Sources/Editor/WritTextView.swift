@@ -45,6 +45,86 @@ final class WritTextView: NSTextView {
         }
     }
 
+    /// Characters whose typing triggers auto-pair behavior — wrap any
+    /// selected text with the pair, or insert open+close around the
+    /// caret. Implemented here (in `insertText`) instead of in the
+    /// `NSTextViewDelegate.textView(_:shouldChangeTextIn:)` callback to
+    /// avoid nesting `shouldChangeText` calls inside the delegate's
+    /// dispatch — that nesting corrupted NSTextView's undo bookkeeping
+    /// so Cmd-Z couldn't replay wrap operations in reverse.
+    private static let autoPairs: [(open: String, close: String)] = [
+        ("(", ")"), ("[", "]"), ("{", "}"),
+        ("\"", "\""), ("'", "'"),
+        ("*", "*"), ("_", "_"), ("`", "`"), ("$", "$")
+    ]
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        let typed: String
+        if let s = string as? String {
+            typed = s
+        } else if let s = string as? NSAttributedString {
+            typed = s.string
+        } else {
+            typed = ""
+        }
+        // Only single-character inserts trigger auto-pair logic.
+        guard typed.count == 1, let pair = WritTextView.autoPairs.first(where: { $0.open == typed }) else {
+            super.insertText(string, replacementRange: replacementRange)
+            return
+        }
+        let selection = selectedRange()
+        let docNS = self.string as NSString
+
+        // Selection present: wrap it with the pair as a single edit
+        // (one `super.insertText` call → one shouldChangeText cycle
+        // → one undo group). The user's Cmd-Z then replays the wrap
+        // in reverse.
+        if selection.length > 0 {
+            let selected = docNS.substring(with: selection)
+            let combined = pair.open + selected + pair.close
+            super.insertText(combined, replacementRange: selection)
+            let inside = NSRange(
+                location: selection.location + (pair.open as NSString).length,
+                length: (selected as NSString).length
+            )
+            setSelectedRange(inside)
+            return
+        }
+
+        // No selection: a couple of context-sensitive skips first,
+        // then insert open+close with the caret parked between them.
+        if selection.location < docNS.length {
+            let next = docNS.substring(with: NSRange(location: selection.location, length: 1))
+            if next == pair.close {
+                // Already a closer next to the caret — don't auto-pair;
+                // let the typed character drop in normally so the user
+                // can build up "**" → "***" if they really want.
+                super.insertText(string, replacementRange: replacementRange)
+                return
+            }
+        }
+        if pair.open == "'", selection.location > 0 {
+            let prev = docNS.substring(with: NSRange(location: selection.location - 1, length: 1))
+            if let scalar = prev.unicodeScalars.first, scalar.properties.isAlphabetic {
+                // Inside a word — treat as an apostrophe (contraction),
+                // not as a quote pair.
+                super.insertText(string, replacementRange: replacementRange)
+                return
+            }
+        }
+        // `replacementRange.location` can be `NSNotFound` (== `Int.max`)
+        // when the caller means "use the current selection" — arithmetic
+        // on it overflows. The user's selection.location is the actual
+        // insertion point.
+        let combined = pair.open + pair.close
+        super.insertText(combined, replacementRange: replacementRange)
+        let between = NSRange(
+            location: selection.location + (pair.open as NSString).length,
+            length: 0
+        )
+        setSelectedRange(between)
+    }
+
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard !codeBlockRanges.isEmpty,

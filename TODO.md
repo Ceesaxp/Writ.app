@@ -140,6 +140,67 @@ Outside the strict M0–M4 plan. Bundle into a post-MVP polish pass.
       `needsDisplay` on every storage edit. Catches both user
       keystrokes and the highlighter pass.
 
+---
+
+## v0.4.9 — editor stability — **DONE 2026-06-08**
+
+A focused follow-up to v0.4.8. The relayout-glitch fix in 0.4.8
+addressed the blank band but exposed a different long-doc regression:
+pressing Enter in a >screenful document caused the visible top line to
+"snap" 10–17 lines. We chased it through multiple hypothesis cycles
+(documented at length in the session log) and landed on three
+compounding fixes.
+
+- [x] **Stop the "snap on Enter" in long documents.** Root cause
+      identified after extensive instrumentation: TextKit 2's
+      `NSTextLayoutFragment`s are lazily measured, and the async
+      syntax highlighter's `setAttributes(baseAttributes, range:
+      fullRange)` + `addAttribute(.font, ...)` re-applied every 80ms
+      invalidated font metrics across the *entire* document. TextKit
+      silently re-measured fragments above the viewport, so the same
+      `clipView.bounds.origin.y` ended up pointing at a different
+      source line.
+
+      The fix combines three things:
+        1. `EditorViewController.fixedLineHeightParagraphStyle(for:)`
+           sets `NSParagraphStyle.minimumLineHeight ==
+           maximumLineHeight` derived from the base font's natural
+           line height. Locks visual line rhythm so even when `.font`
+           changes the affected fragments stay the same height.
+        2. `MarkdownSyntaxHighlighter.applyHighlight` now accepts
+           an optional `editedRange:` and re-applies attributes
+           *only* within a scope expanded around the edit. The
+           scope expansion reads the current storage's attribute
+           runs (via `enumerateAttributes`) to absorb any stale
+           highlighter styling that needs resetting — robust to
+           the coordinate shifts of arbitrary edits because
+           `NSTextStorage` auto-translates attribute ranges as text
+           moves. Fragments *outside* the scope are never touched,
+           so TextKit has nothing to re-measure.
+        3. The storage delegate accumulates the union of edited
+           ranges since the previous highlight pass (multiple
+           keystrokes during the 80ms debounce coalesce into one
+           scope). The highlighter call is wrapped with
+           `undoManager.disableUndoRegistration()` so the
+           presentation-only attribute changes don't pollute the
+           user's undo stack.
+
+- [x] **Fix auto-pair undo (`*`, `**`, `_`, etc.).** When the user
+      typed `*` on a selection, the auto-pair logic in
+      `EditorViewController.handleAutoPair` called
+      `textView.shouldChangeText` *inside* the delegate's outer
+      `shouldChangeText` callback — nesting that corrupted
+      NSTextView's undo bookkeeping so Cmd-Z stopped at intermediate
+      states (one stray `*` left over, or worse).
+
+      Moved the auto-pair logic into `WritTextView.insertText(_:
+      replacementRange:)` instead. That's a clean entry point above
+      the delegate dispatch: `super.insertText(combined,
+      replacementRange:)` triggers one `shouldChangeText` cycle and
+      one undo group per keystroke. All auto-pair cases (wrap
+      selection, insert pair at cursor, smart-skip closer, apostrophe
+      inside a word) work correctly under repeated Cmd-Z.
+
 ## v0.5.0 — milestone scope (confirmed 2026-06-04)
 
 GitHub milestone "0.5.0" carries the post-0.4.8 issues. #11

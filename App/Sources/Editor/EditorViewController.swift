@@ -138,29 +138,13 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             object: scroll.contentView
         )
 
-        // TextKit 2 sometimes leaves a blank band below the edit point
-        // in a long document: the storage edit invalidates fragments
-        // from the cursor through end-of-doc, the line-number gutter
-        // keeps up because it walks fragments with `.ensuresLayout`,
-        // but the text view's own paint can show stale (or absent)
-        // geometry until the user scrolls. Force the viewport to
-        // relayout and the text view to redraw on every storage edit;
-        // both user keystrokes and the async syntax highlighter's
-        // attribute pass route through this notification.
-        if let storage = textView.textStorage {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(handleTextStorageEdit(_:)),
-                name: NSTextStorage.didProcessEditingNotification,
-                object: storage
-            )
-        }
-    }
-
-    @objc private func handleTextStorageEdit(_ note: Notification) {
-        guard let textLayoutManager = textView.textLayoutManager else { return }
-        textLayoutManager.textViewportLayoutController.layoutViewport()
-        textView.needsDisplay = true
+        // The async syntax highlighter applies an attribute-only pass
+        // over the document. Under TextKit 2 attribute changes don't
+        // always trigger a redraw of off-viewport regions; nudge the
+        // textView whenever the storage finishes processing an
+        // attribute edit. Character mutations are left to TextKit's
+        // native path.
+        textView.textStorage?.delegate = self
     }
 
     @objc private func clipViewFrameDidChange(_ note: Notification) {
@@ -410,96 +394,42 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         scheduleHighlight()
     }
 
+    /// Paragraph style with `minimumLineHeight == maximumLineHeight` locked
+    /// to the base editor font's natural line height. Without this, any
+    /// `.font` change in the syntax highlighter (bold for `**strong**`,
+    /// italic for `*emphasis*`, heavier weight for headings) would change
+    /// each affected fragment's intrinsic height — and TextKit 2 would
+    /// silently re-measure fragments above the viewport, shifting their
+    /// cumulative Y values and snapping the visible top line. Locking line
+    /// height means every line occupies the same vertical space regardless
+    /// of which font is set on its characters, so the layout stays stable.
+    private static func fixedLineHeightParagraphStyle(for font: NSFont) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        let lineHeight = font.ascender + abs(font.descender) + font.leading
+        style.minimumLineHeight = lineHeight
+        style.maximumLineHeight = lineHeight
+        return style
+    }
+
     private func defaultAttributes() -> [NSAttributedString.Key: Any] {
-        [
-            .font: Self.editorFont(),
-            .foregroundColor: NSColor.textColor
+        let font = Self.editorFont()
+        return [
+            .font: font,
+            .foregroundColor: NSColor.textColor,
+            .paragraphStyle: Self.fixedLineHeightParagraphStyle(for: font)
         ]
     }
 
     // MARK: - Auto-pair (brackets, quotes, fences)
 
-    /// Characters that auto-insert their closing pair when typed. The first
-    /// element is what the user types; the second is what gets inserted
-    /// after the cursor.
-    private static let autoPairs: [(open: String, close: String)] = [
-        ("(", ")"),
-        ("[", "]"),
-        ("{", "}"),
-        ("\"", "\""),
-        ("'", "'"),
-        ("*", "*"),
-        ("_", "_"),
-        ("`", "`"),
-        ("$", "$")
-    ]
-
-    /// Called from NSTextViewDelegate.shouldChangeText. If the user is about
-    /// to insert a single auto-pair-open character at a collapsed selection,
-    /// we insert both characters and place the cursor between them — and
-    /// suppress the original change.
-    private func handleAutoPair(replacementString: String?) -> Bool {
-        guard let typed = replacementString, typed.count == 1 else { return false }
-        let selected = textView.selectedRange()
-        guard selected.length == 0 else {
-            // Selection present: wrap the selection in the pair if the typed
-            // character is one of the pair openers.
-            for pair in Self.autoPairs where pair.open == typed {
-                return wrapSelection(with: pair, range: selected)
-            }
-            return false
-        }
-        for pair in Self.autoPairs where pair.open == typed {
-            // Skip auto-pair if the next character is the closing one we'd
-            // insert — typing `)` next to `)` should just move past it,
-            // typing `"` next to `"` shouldn't double up.
-            let ns = textView.string as NSString
-            if selected.location < ns.length {
-                let next = ns.substring(with: NSRange(location: selected.location, length: 1))
-                if next == pair.close { return false }
-            }
-            // Skip if the previous character is a word character and the
-            // typed char is `'` (so contractions like "don't" still work).
-            if pair.open == "'" && selected.location > 0 {
-                let prev = ns.substring(with: NSRange(location: selected.location - 1, length: 1))
-                if !prev.isEmpty, let scalar = prev.unicodeScalars.first,
-                   scalar.properties.isAlphabetic { return false }
-            }
-            // Insert open + close, position cursor between them.
-            let combined = pair.open + pair.close
-            if textView.shouldChangeText(in: selected, replacementString: combined) {
-                textView.textStorage?.replaceCharacters(in: selected, with: combined)
-                textView.didChangeText()
-                let between = NSRange(location: selected.location + (pair.open as NSString).length, length: 0)
-                textView.setSelectedRange(between)
-                currentSource = textView.string
-                return true
-            }
-            return false
-        }
-        return false
-    }
-
-    private func wrapSelection(with pair: (open: String, close: String), range: NSRange) -> Bool {
-        let ns = textView.string as NSString
-        let selected = ns.substring(with: range)
-        let combined = pair.open + selected + pair.close
-        if textView.shouldChangeText(in: range, replacementString: combined) {
-            textView.textStorage?.replaceCharacters(in: range, with: combined)
-            textView.didChangeText()
-            // Re-select the formerly-selected text inside the new pair.
-            let inside = NSRange(location: range.location + (pair.open as NSString).length, length: (selected as NSString).length)
-            textView.setSelectedRange(inside)
-            currentSource = textView.string
-            return true
-        }
-        return false
-    }
-
     // MARK: - NSTextViewDelegate
 
     func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
-        if handleAutoPair(replacementString: replacementString) { return false }
+        // Auto-pair (typing "*" with a selection to wrap, etc.) is
+        // handled inside `WritTextView.insertText` rather than here.
+        // That avoids nesting `shouldChangeText` calls inside the
+        // delegate dispatch — which corrupts NSTextView's undo
+        // bookkeeping so Cmd-Z stops mid-sequence.
         return true
     }
 
@@ -535,6 +465,12 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         textView.setSelectedRange(plan.placeholderRange)
     }
 
+    /// Accumulator for character-edit ranges between highlight passes.
+    /// The highlighter is debounced 80 ms — multiple keystrokes can
+    /// land in that window. We pass the union to the highlighter so it
+    /// can compute the minimal scope that needs re-styling.
+    fileprivate var pendingEditScope: NSRange?
+
     private func scheduleHighlight() {
         highlightThrottle?.cancel()
         let snapshot = currentSource
@@ -547,12 +483,55 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             // Disable heavy highlighting on large documents to keep typing
             // responsive — only base attributes are applied.
             guard snapshot.utf8.count < 500_000 else { return }
-            await self.syntaxHighlighter.applyHighlight(to: storage, source: snapshot, baseAttributes: attrs)
+            let scope = self.pendingEditScope
+            self.pendingEditScope = nil
+            // The highlighter's attribute changes are not part of the
+            // user's editing history — they're a presentation layer.
+            // Disable undo registration around the pass so Cmd-Z steps
+            // through the user's text edits cleanly instead of
+            // alternating between attribute-only and text changes.
+            let undoMgr = self.textView.undoManager
+            undoMgr?.disableUndoRegistration()
+            await self.syntaxHighlighter.applyHighlight(
+                to: storage,
+                source: snapshot,
+                baseAttributes: attrs,
+                editedRange: scope
+            )
+            undoMgr?.enableUndoRegistration()
             // Push the code-block ranges to the WritTextView so its
             // drawBackground pass can paint full-width fills.
             if let writTextView = self.textView as? WritTextView {
                 writTextView.codeBlockRanges = self.syntaxHighlighter.codeBlockRanges
             }
+        }
+    }
+}
+
+extension EditorViewController: @preconcurrency NSTextStorageDelegate {
+    func textStorage(
+        _ textStorage: NSTextStorage,
+        didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        if editedMask.contains(.editedCharacters) {
+            // Accumulate the edited range so the next highlight pass
+            // can scope its attribute changes around it. The union
+            // covers all edits that landed within the highlighter's
+            // 80 ms debounce window.
+            if let existing = pendingEditScope {
+                pendingEditScope = NSUnionRange(existing, editedRange)
+            } else {
+                pendingEditScope = editedRange
+            }
+            return
+        }
+        // Pure attribute edits (the highlighter's own pass) don't
+        // always trigger a redraw of off-viewport regions — nudge the
+        // text view so the new styling paints.
+        if editedMask.contains(.editedAttributes) {
+            textView.needsDisplay = true
         }
     }
 }
