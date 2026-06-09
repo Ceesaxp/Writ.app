@@ -199,7 +199,14 @@ final class WritDocument: NSDocument {
     /// diff here — the editor passes the full string. The preview pipeline is
     /// snapshot-driven, so this is cheap.
     func applyEditorText(_ newText: String) {
-        if newText == sourceText { return }
+        // Drop the previous `newText == sourceText` short-circuit:
+        // on a 500 KB doc the full-string compare is the dominant
+        // cost on every keystroke. The hot path only fires when
+        // NSTextView's `didChangeText` has already confirmed the
+        // storage edited, so a no-op call would be rare anyway. The
+        // worst case from removing the guard is a redundant undo
+        // record + bridge schedule on a callback that produced no
+        // visible change — both are cheap and idempotent.
         let oldText = sourceText
         sourceText = newText
         updateChangeCount(.changeDone)

@@ -226,31 +226,17 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     }
 
     /// Clears any spell-check squiggles already drawn on code ranges.
-    /// `.spellingState` is a *rendering* attribute (TextKit's temporary-
-    /// attribute side-channel), not a storage attribute — clearing it
-    /// has to go through `NSText.setSpellingState(_:range:)` or the
-    /// TextKit 2 layout manager's `removeRenderingAttribute(_:for:)`,
-    /// not `NSTextStorage.removeAttribute`. We call both so the work
-    /// lands whether the textView is on TextKit 1 or 2.
+    /// `.spellingState` is a temporary (rendering) attribute, not a
+    /// storage attribute — under TK1 the NSText.setSpellingState path
+    /// is the one that updates NSLayoutManager's temporary-attribute
+    /// store.
     fileprivate func clearSpellingStateInCodeRanges() {
         guard !spellCheckSkipRanges.isEmpty else { return }
         let docLength = (textView.string as NSString).length
         for range in spellCheckSkipRanges {
             let clamped = NSIntersectionRange(range, NSRange(location: 0, length: docLength))
             guard clamped.length > 0 else { continue }
-            // NSText API (works under either TextKit).
             textView.setSpellingState(0, range: clamped)
-            // TextKit 2 rendering-attribute removal — belt-and-braces
-            // in case the NSText path doesn't propagate to the
-            // NSTextLayoutManager's rendering store.
-            if let tlm = textView.textLayoutManager {
-                let docStart = tlm.documentRange.location
-                if let start = tlm.location(docStart, offsetBy: clamped.location),
-                   let end = tlm.location(start, offsetBy: clamped.length),
-                   let textRange = NSTextRange(location: start, end: end) {
-                    tlm.removeRenderingAttribute(.spellingState, for: textRange)
-                }
-            }
         }
     }
 
@@ -273,8 +259,8 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     /// performs the scroll so the two panes don't ping-pong.
     private var suppressScrollNotify = false
     func scrollToSourceLine(_ line: Int) {
-        guard let textLayoutManager = textView.textLayoutManager else { return }
-        // Map 1-indexed line → UTF-16 offset → text-layout fragment → frame.
+        guard let layoutManager = textView.layoutManager else { return }
+        // Map 1-indexed line → UTF-16 offset → glyph → line-fragment frame.
         let utf16 = currentSource.utf16
         var lineIndex = 1
         var consumed = 0
@@ -284,15 +270,16 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             idx = utf16.index(after: idx)
             consumed += 1
         }
-        let docStart = textLayoutManager.documentRange.location
-        guard let target = textLayoutManager.location(docStart, offsetBy: consumed) else { return }
-        textLayoutManager.ensureLayout(for: NSTextRange(location: target))
-        var targetY: CGFloat?
-        textLayoutManager.enumerateTextLayoutFragments(from: target, options: [.ensuresLayout]) { fragment in
-            targetY = fragment.layoutFragmentFrame.minY
-            return false
-        }
-        guard let y = targetY else { return }
+        let docLength = layoutManager.numberOfGlyphs
+        guard consumed <= (textView.string as NSString).length else { return }
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: consumed)
+        guard glyphIndex <= docLength else { return }
+        let lineRect = layoutManager.lineFragmentRect(
+            forGlyphAt: min(glyphIndex, max(0, docLength - 1)),
+            effectiveRange: nil
+        )
+        // lineFragmentRect is in container coords; translate to textView.
+        let y = lineRect.minY + textView.textContainerOrigin.y
         suppressScrollNotify = true
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: y))
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -305,38 +292,53 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     /// visible area. Used for block-aware preview scroll sync — the bridge
     /// passes this to the preview so it can align the matching block.
     private func topVisibleSourceLine() -> Int {
-        guard let textLayoutManager = textView.textLayoutManager else { return 1 }
-        let visibleY = scrollView.contentView.bounds.origin.y + textView.textContainerOrigin.y
-        var topLine = 1
-        textLayoutManager.enumerateTextLayoutFragments(
-            from: textLayoutManager.textViewportLayoutController.viewportRange?.location,
-            options: [.ensuresLayout]
-        ) { fragment in
-            let frame = fragment.layoutFragmentFrame
-            if frame.maxY < visibleY { return true }
-            // First fragment at or below the visible top.
-            let location = fragment.rangeInElement.location
-            let offset = textLayoutManager.offset(
-                from: textLayoutManager.documentRange.location,
-                to: location
-            )
-            topLine = DocumentSnapshot.lineColumn(in: currentSource, utf16Offset: offset).line
-            return false
-        }
-        return topLine
+        guard let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return 1 }
+        let containerOrigin = textView.textContainerOrigin
+        let visibleRect = scrollView.contentView.bounds
+        let containerVisible = NSRect(
+            x: visibleRect.minX - containerOrigin.x,
+            y: visibleRect.minY - containerOrigin.y,
+            width: visibleRect.width,
+            height: visibleRect.height
+        )
+        let visibleGlyphs = layoutManager.glyphRange(forBoundingRect: containerVisible, in: textContainer)
+        let firstChar = layoutManager.characterIndexForGlyph(at: visibleGlyphs.location)
+        return DocumentSnapshot.lineColumn(in: currentSource, utf16Offset: firstChar).line
     }
 
     private func makeTextView() -> NSTextView {
-        // Custom NSTextView subclass paints a full-width background behind
-        // fenced code-block ranges before super.drawBackground draws the
-        // editor's normal background.
+        // TK1 stack. macOS 14+ NSTextView defaults to TextKit 2, whose lazy
+        // viewport-based layout caused visible keystroke latency on
+        // multi-hundred-line docs (paints had to wait for fragment
+        // re-measurement even after sub-ms storage edits). TK1 lays out
+        // eagerly which is faster for the doc sizes Writ targets, and it
+        // sidesteps a class of TK2-specific quirks (snap-on-Enter from
+        // fragment-height recompute, ensuresLayout cost inside gutter
+        // draw, font-change re-measurement after attribute edits).
+        //
+        // Order matters: storage owns the layout manager, layout manager
+        // owns the container, NSTextView is initialised with the
+        // container. Passing a TK1 container (one whose `layoutManager`
+        // is non-nil) is what locks the textView into the TK1 path.
         let frame = NSRect(x: 0, y: 0, width: 200, height: 200)
-        let textContainer = NSTextContainer(size: NSSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
-        let textLayoutManager = NSTextLayoutManager()
-        textLayoutManager.textContainer = textContainer
-        let textContentStorage = NSTextContentStorage()
-        textContentStorage.addTextLayoutManager(textLayoutManager)
+        let textStorage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: 200, height: CGFloat.greatestFiniteMagnitude)
+        )
+        textContainer.widthTracksTextView = true
+        layoutManager.addTextContainer(textContainer)
         let textView = WritTextView(frame: frame, textContainer: textContainer)
+        // Runtime proof of which TextKit path we're on. If the migration
+        // worked we expect `layoutManager` non-nil and `textLayoutManager`
+        // nil. If it's the other way around, NSTextView ignored our
+        // container and instantiated a fresh TK2 stack — and the
+        // perf hunt needs to look elsewhere.
+        LatencyProbe.log.notice(
+            "textView built — textKit1=\(textView.layoutManager != nil, privacy: .public) textKit2=\(textView.textLayoutManager != nil, privacy: .public)"
+        )
         return textView
     }
 
@@ -529,10 +531,15 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         guard !suppressDelegateBroadcast else { return }
+        let start = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
         let text = textView.string
         currentSource = text
         delegate?.editor(self, didChangeText: text)
         scheduleHighlight()
+        if LatencyProbe.enabled {
+            let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            LatencyProbe.log.info("textDidChange total \(ms, format: .fixed(precision: 2))ms (doc=\(text.utf8.count, privacy: .public)B)")
+        }
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {

@@ -53,13 +53,14 @@ final class PreviewBridge {
     }
 
     func scheduleUpdate(source: String) {
-        bridgeLog.notice("scheduleUpdate bytes=\(source.utf8.count)")
-        statusBar?.update(byteCount: source.utf8.count, lineCount: nil, status: nil)
+        // The editor delegate already updated the status bar with the
+        // byte count on the keystroke; skipping a duplicate update here
+        // saves an `utf8.count` walk per call (O(N) for NSString-bridged
+        // strings, which `NSTextView.string` returns).
         Task { await scheduler.scheduleUpdate(source: source) }
     }
 
     func forceRefresh(source: String) {
-        statusBar?.update(byteCount: source.utf8.count, lineCount: nil, status: nil)
         Task { await scheduler.forceRefresh(source: source) }
     }
 

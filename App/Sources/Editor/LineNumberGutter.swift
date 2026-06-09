@@ -3,18 +3,16 @@ import Cocoa
 /// Custom NSView that draws line numbers down the left edge of the editor.
 ///
 /// Sits as a sibling of the scroll view (not inside it as an `NSRulerView`)
-/// because NSRulerView + TextKit 2 has a layout/visibility issue on macOS 15
-/// where the ruler attaches at the correct thickness but is not visually
-/// rendered. By taking full control of layout and drawing we sidestep the
-/// problem entirely.
+/// because NSRulerView interacts poorly with our layout container setup.
+/// Taking full control of layout and drawing sidesteps that.
 ///
 /// The gutter:
 /// - is a fixed-width view to the left of the scroll view
 /// - observes the scroll view's `contentView` bounds notifications so it
 ///   redraws every time the text scrolls
-/// - walks `NSTextLayoutManager.enumerateTextLayoutFragments(...)` to find
-///   visible line fragments, translates each fragment's Y from text-
-///   container space into gutter-local space, and paints the (1-indexed)
+/// - asks `NSLayoutManager` for the visible glyph range, then enumerates
+///   line fragments inside it, deduplicating source lines that span
+///   multiple fragments (wrapped lines) before painting the (1-indexed)
 ///   source-line number right-aligned in the gutter
 /// - rebuilds a sparse "line starts" array on text change and keeps it
 ///   warm between draws so per-scroll work is O(visible fragments)
@@ -95,9 +93,17 @@ final class LineNumberGutter: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let drawStart = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
+        defer {
+            if LatencyProbe.enabled {
+                let ms = (CFAbsoluteTimeGetCurrent() - drawStart) * 1000
+                LatencyProbe.log.info("gutter.draw \(ms, format: .fixed(precision: 2))ms")
+            }
+        }
         guard let textView,
               let clipView,
-              let textLayoutManager = textView.textLayoutManager else {
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else {
             return
         }
 
@@ -118,45 +124,42 @@ final class LineNumberGutter: NSView {
             .font: font,
             .foregroundColor: NSColor.secondaryLabelColor
         ]
-        // Align the label vertically with the first visual line in the
-        // layout fragment, not the centre of the whole (possibly wrapped)
-        // block. Empirically a 1-2pt inset from the fragment top puts the
-        // number's baseline on the same row as the source text's first
-        // baseline for the typical 13pt monospace editor font.
+        // 1-2pt inset puts the number's baseline on the same row as the
+        // source text's first baseline for the typical 13pt monospace.
         let labelTopInset: CGFloat = 2
 
-        var lastNumberedLine: Int = -1
-        textLayoutManager.enumerateTextLayoutFragments(
-            from: textLayoutManager.textViewportLayoutController.viewportRange?.location,
-            options: [.ensuresLayout]
-        ) { fragment in
-            let fragmentRect = fragment.layoutFragmentFrame
-            if fragmentRect.maxY < visibleRect.minY { return true }
-            if fragmentRect.minY > visibleRect.maxY { return false }
+        // Translate textView-coordinate visibleRect into container coords
+        // by subtracting the container's origin inside the textView.
+        let containerOrigin = textView.textContainerOrigin
+        let containerVisible = NSRect(
+            x: visibleRect.minX - containerOrigin.x,
+            y: visibleRect.minY - containerOrigin.y,
+            width: visibleRect.width,
+            height: visibleRect.height
+        )
+        let visibleGlyphRange = layoutManager.glyphRange(
+            forBoundingRect: containerVisible,
+            in: textContainer
+        )
 
-            let location = fragment.rangeInElement.location
-            let offset = textLayoutManager.offset(
-                from: textLayoutManager.documentRange.location,
-                to: location
-            )
-            let lineNum = self.lineNumber(for: offset)
-            if lineNum == lastNumberedLine { return true }
+        var lastNumberedLine: Int = -1
+        layoutManager.enumerateLineFragments(forGlyphRange: visibleGlyphRange) { lineRect, _, _, glyphRange, _ in
+            let charIndex = layoutManager.characterIndexForGlyph(at: glyphRange.location)
+            let lineNum = self.lineNumber(for: charIndex)
+            if lineNum == lastNumberedLine { return }
             lastNumberedLine = lineNum
 
             let label = "\(lineNum)"
             let labelSize = (label as NSString).size(withAttributes: attrs)
-            // Translate fragment Y (text-container space, flipped) to gutter
-            // local space. We're flipped already.
-            let containerInset = textView.textContainerOrigin.y
-            let fragmentTop = (fragmentRect.minY + containerInset) - visibleRect.minY
+            // Translate from container Y to gutter-local Y (we're flipped).
+            let fragmentTop = (lineRect.minY + containerOrigin.y) - visibleRect.minY
             let drawRect = NSRect(
-                x: bounds.width - labelSize.width - 8,
+                x: self.bounds.width - labelSize.width - 8,
                 y: fragmentTop + labelTopInset,
                 width: labelSize.width,
                 height: labelSize.height
             )
             (label as NSString).draw(in: drawRect, withAttributes: attrs)
-            return true
         }
     }
 }

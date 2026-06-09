@@ -74,6 +74,9 @@ final class PreviewViewController: NSViewController {
     }
 
     private var hasIssuedLoad = false
+    private lazy var customCSSWatcher = CustomCSSWatcher { [weak self] in
+        self?.applyPreviewAppearance()
+    }
     /// Document directory used to resolve `writ-doc://` URLs to local files.
     /// Updated by `DocumentWindowController` when the document gains a URL.
     var documentDirectory: URL? {
@@ -119,6 +122,13 @@ final class PreviewViewController: NSViewController {
         let json = serializeForJS(css)
         let customJS = "window.Writ && window.Writ.setCustomCSS && window.Writ.setCustomCSS(\(json))"
         webView.evaluateJavaScript(customJS, completionHandler: nil)
+
+        // Keep the watcher in sync with the active path. Picking a
+        // new file or clearing flows through `PreviewAppearance.
+        // didChange` → here. The watcher itself debounces edit
+        // bursts, calls back into `applyPreviewAppearance`, which
+        // re-reads and re-pushes — closed loop.
+        customCSSWatcher.start(watching: PreviewAppearance.customCSSURL)
     }
 
     private func readUserCustomCSS() -> String {
@@ -241,26 +251,56 @@ final class PreviewViewController: NSViewController {
     /// Push a render result to the preview. Safe to call before the shell is
     /// ready — the latest payload is replayed when JS reports ready.
     func apply(_ payload: PreviewBridgePayload) {
+        let applyStart = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
         if !isReady {
             previewLog.notice("apply: not ready yet, stashing pendingPayload rev=\(payload.revision)")
             pendingPayload = payload
             return
         }
-        do {
-            let json = try payload.encodedAsJSON()
-            let js = "window.Writ && window.Writ.update(\(json))"
-            lastAppliedPayload = payload
-            previewLog.notice("apply: evaluating Writ.update rev=\(payload.revision) json=\(json.utf8.count)B")
-            webView.evaluateJavaScript(js) { [weak self] _, error in
-                if let error {
-                    previewLog.error("Writ.update failed: \(error.localizedDescription, privacy: .public)")
-                } else {
-                    previewLog.notice("Writ.update evaluated OK rev=\(payload.revision)")
+        lastAppliedPayload = payload
+        // JSON-encoding the payload includes the full rendered HTML (often
+        // 50–100 KB for a medium doc) plus the per-block metadata. At ~5–15ms
+        // on main per parse, this was visible as keystroke lag whenever the
+        // user paused long enough for a debounced parse to fire. Encoding off
+        // the main actor keeps the keystroke path responsive; the resulting
+        // delivery delay (typically <10 ms) is invisible against the 250ms
+        // debounce.
+        let revision = payload.revision
+        Task.detached(priority: .utility) { [weak self] in
+            let encodeStart = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
+            let json: String
+            do {
+                json = try payload.encodedAsJSON()
+            } catch {
+                await MainActor.run {
+                    previewLog.error("failed to encode payload: \(error.localizedDescription, privacy: .public)")
                 }
-                self?.lastRenderedRevision = DocumentRevision(payload.revision)
+                return
             }
-        } catch {
-            previewLog.error("failed to encode payload: \(error.localizedDescription, privacy: .public)")
+            let encodeMs = LatencyProbe.enabled ? (CFAbsoluteTimeGetCurrent() - encodeStart) * 1000 : 0
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                let js = "window.Writ && window.Writ.update(\(json))"
+                if LatencyProbe.enabled {
+                    let mainMs = (CFAbsoluteTimeGetCurrent() - applyStart) * 1000
+                    LatencyProbe.log.info("apply rev=\(revision, privacy: .public) mainBlocked=\(mainMs, format: .fixed(precision: 2))ms encodeOffMain=\(encodeMs, format: .fixed(precision: 2))ms json=\(json.utf8.count, privacy: .public)B")
+                }
+                previewLog.notice("apply: evaluating Writ.update rev=\(revision) json=\(json.utf8.count)B")
+                self.webView.evaluateJavaScript(js) { [weak self] _, error in
+                    if let error {
+                        previewLog.error("Writ.update failed: \(error.localizedDescription, privacy: .public)")
+                    } else {
+                        previewLog.notice("Writ.update evaluated OK rev=\(revision)")
+                    }
+                    // Encoding now runs off-main so completions can arrive
+                    // out of revision order; only adopt the rev if it's the
+                    // newest one we've seen, otherwise the status bar can
+                    // flicker between a stale revision and the current one.
+                    if let self, revision > self.lastRenderedRevision.value {
+                        self.lastRenderedRevision = DocumentRevision(revision)
+                    }
+                }
+            }
         }
     }
 

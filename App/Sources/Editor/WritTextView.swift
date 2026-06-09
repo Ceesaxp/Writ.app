@@ -8,7 +8,7 @@ import WritParser
 /// The editor's syntax highlighter pushes the current set of code-block
 /// UTF-16 ranges via `codeBlockRanges`. On every `drawBackground(in:)`
 /// — which fires before glyph rendering — we walk those ranges, find each
-/// one's vertical span using `NSTextLayoutManager.enumerateTextSegments`,
+/// one's vertical span using `NSLayoutManager.enumerateLineFragments`,
 /// and fill across the textView's full width.
 @MainActor
 final class WritTextView: NSTextView {
@@ -21,29 +21,6 @@ final class WritTextView: NSTextView {
     /// Background colour for code-block lines. Defaults to a subtle tint.
     var codeBlockBackgroundColor: NSColor = NSColor(calibratedWhite: 0.93, alpha: 1) {
         didSet { needsDisplay = true }
-    }
-
-    // TextKit 2's NSTextLayoutManager does not honour the legacy
-    // `widthTracksTextView` flag the way TextKit 1 did — the text
-    // container holds onto whatever width it was first sized with,
-    // so lines wrap at that fixed width regardless of the actual
-    // visible area. Bridge it manually by resizing the container
-    // every time the text view's frame width changes.
-    //
-    // NOTE on padding: `NSTextContainer.size.width` is the layout width
-    // INCLUDING the per-side `lineFragmentPadding`. The glyph layout
-    // area inside is automatically reduced by the padding. So the
-    // container width should equal the view width, not the view width
-    // minus the padding.
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        guard let container = textContainer else { return }
-        if container.size.width != newSize.width {
-            container.size = NSSize(width: newSize.width, height: container.size.height)
-            // TextKit 2's layout manager doesn't invalidate automatically
-            // on container resize; force a re-layout so wrap takes effect.
-            textLayoutManager?.invalidateLayout(for: textLayoutManager!.documentRange)
-        }
     }
 
     /// Characters whose typing triggers auto-pair behavior — wrap any
@@ -68,6 +45,13 @@ final class WritTextView: NSTextView {
     private static let markdownOnlyAutoPairs: Set<String> = ["*", "_", "`", "$"]
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
+        let start = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
+        defer {
+            if LatencyProbe.enabled {
+                let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                LatencyProbe.log.info("insertText \(ms, format: .fixed(precision: 2))ms")
+            }
+        }
         let typed: String
         if let s = string as? String {
             typed = s
@@ -84,12 +68,23 @@ final class WritTextView: NSTextView {
         let selection = selectedRange()
         let docNS = self.string as NSString
 
-        // Suppress markdown-only auto-pairs when the cursor sits inside
-        // the front-matter block. `*foo*` etc. is not emphasis there.
-        if WritTextView.markdownOnlyAutoPairs.contains(pair.open),
-           selectionIsInFrontMatter(selection: selection) {
-            super.insertText(string, replacementRange: replacementRange)
-            return
+        // Both the front-matter gate (#26) and the `math: false` gate
+        // (#27) need to know about the document's front matter. Looking
+        // it up via `FrontMatterExtractor` on every keystroke compounds
+        // — combine into a single cached lookup that's reused for both
+        // checks and refreshed only when the text storage actually
+        // changes.
+        if WritTextView.markdownOnlyAutoPairs.contains(pair.open) {
+            let fm = cachedFrontMatterInfo()
+            let selectionEnd = selection.location + selection.length
+            if selection.location < fm.utf16Length && selectionEnd <= fm.utf16Length {
+                super.insertText(string, replacementRange: replacementRange)
+                return
+            }
+            if pair.open == "$" && fm.mathDisabled {
+                super.insertText(string, replacementRange: replacementRange)
+                return
+            }
         }
 
         // Selection present: wrap it with the pair as a single edit
@@ -149,46 +144,100 @@ final class WritTextView: NSTextView {
     /// `FrontMatter.charCount` is in `Character` units; convert via
     /// the source's UTF-16 prefix to compare against `selectedRange()`
     /// which is in UTF-16 code units.
-    private func selectionIsInFrontMatter(selection: NSRange) -> Bool {
+    /// Compact summary of the active document's front matter relevant
+    /// to the auto-pair gates: where it ends (in UTF-16 code units, so
+    /// it can be compared against `NSRange`) and whether `math: false`
+    /// is set. Both `0` / `false` when no FM is present.
+    private struct FrontMatterInfo {
+        let utf16Length: Int
+        let mathDisabled: Bool
+        static let empty = FrontMatterInfo(utf16Length: 0, mathDisabled: false)
+    }
+
+    /// Cached `FrontMatterInfo` — recomputed lazily when the text
+    /// storage changes (`textStorageDidEdit` clears the cache via
+    /// notification). Stale across edits within a single runloop tick
+    /// is fine because auto-pair runs on the input event itself and
+    /// the cache invalidation happens immediately after the storage
+    /// commits.
+    private var cachedFrontMatter: FrontMatterInfo?
+    private var fmObserverRegistered = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, !fmObserverRegistered else { return }
+        // Observe any storage's didProcessEditing — we filter on
+        // `note.object === textStorage` inside the handler so we
+        // ignore unrelated storages. Registering with `object: nil`
+        // dodges the chicken-and-egg of needing the storage pointer
+        // at observe-registration time.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(textStorageDidEdit(_:)),
+            name: NSTextStorage.didProcessEditingNotification,
+            object: nil
+        )
+        fmObserverRegistered = true
+    }
+
+    deinit {
+        if fmObserverRegistered {
+            NotificationCenter.default.removeObserver(self, name: NSTextStorage.didProcessEditingNotification, object: nil)
+        }
+    }
+
+    private func cachedFrontMatterInfo() -> FrontMatterInfo {
+        if let cached = cachedFrontMatter { return cached }
         let source = self.string
-        guard let (fm, _) = FrontMatterExtractor.extract(source) else { return false }
-        let prefix = source.prefix(fm.charCount)
-        let fmUTF16Length = (String(prefix) as NSString).length
-        let selectionEnd = selection.location + selection.length
-        return selection.location < fmUTF16Length && selectionEnd <= fmUTF16Length
+        let info: FrontMatterInfo
+        if let (fm, _) = FrontMatterExtractor.extract(source) {
+            let prefix = source.prefix(fm.charCount)
+            let utf16Length = (String(prefix) as NSString).length
+            let mathDisabled = fm["math"]?.lowercased() == "false"
+            info = FrontMatterInfo(utf16Length: utf16Length, mathDisabled: mathDisabled)
+        } else {
+            info = .empty
+        }
+        cachedFrontMatter = info
+        return info
+    }
+
+    /// Invalidate the FM cache on any storage edit. Filters on
+    /// `note.object === textStorage` because the observer was
+    /// registered with `object: nil` (see `viewDidMoveToWindow`).
+    @objc private func textStorageDidEdit(_ note: Notification) {
+        guard (note.object as AnyObject?) === textStorage else { return }
+        cachedFrontMatter = nil
     }
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard !codeBlockRanges.isEmpty,
-              let textLayoutManager = textLayoutManager else { return }
+        guard !codeBlockRanges.isEmpty, let layoutManager = layoutManager else { return }
 
         codeBlockBackgroundColor.setFill()
         let textViewWidth = bounds.width
         let containerOrigin = textContainerOrigin
 
-        for range in codeBlockRanges {
-            // Resolve UTF-16 NSRange → NSTextRange in the layout manager.
-            let docStart = textLayoutManager.documentRange.location
-            guard let start = textLayoutManager.location(docStart, offsetBy: range.location),
-                  let end = textLayoutManager.location(start, offsetBy: range.length),
-                  let textRange = NSTextRange(location: start, end: end) else { continue }
-
-            // Enumerate visual segments inside the range. Each segment
-            // gives us a rect in text-container coordinates. We translate
-            // to textView coordinates and stretch horizontally to the
-            // full editor width.
-            textLayoutManager.enumerateTextSegments(in: textRange, type: .standard, options: [.rangeNotRequired]) { _, segmentFrame, _, _ in
+        for codeRange in codeBlockRanges {
+            // UTF-16 character range → glyph range. Under TK1 the two
+            // are essentially identical for plain text but the API
+            // takes the round-trip explicitly.
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: codeRange,
+                actualCharacterRange: nil
+            )
+            // Each line fragment inside the code block contributes one
+            // horizontal stripe across the full editor width.
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { lineRect, _, _, _, _ in
                 let viewRect = NSRect(
                     x: 0,
-                    y: segmentFrame.minY + containerOrigin.y,
+                    y: lineRect.minY + containerOrigin.y,
                     width: textViewWidth,
-                    height: segmentFrame.height
+                    height: lineRect.height
                 )
                 if viewRect.intersects(rect) {
                     viewRect.fill()
                 }
-                return true
             }
         }
     }

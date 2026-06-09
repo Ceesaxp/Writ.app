@@ -86,7 +86,12 @@ public actor PreviewScheduler {
         outputContinuation.yield(.started(snapshot.revision))
 
         let parser = self.parser
-        let task = Task.detached(priority: .userInitiated) { [outputContinuation] in
+        // `.utility` (not `.userInitiated`) so a slow parse on a large doc
+        // can't preempt the main thread mid-keystroke. The user only sees
+        // the parsed preview after a debounce + parse, so prioritizing it
+        // above background work but below interactive input is the right
+        // shape.
+        let task = Task.detached(priority: .utility) { [outputContinuation] in
             do {
                 let parsed = try parser.parse(snapshot)
                 if Task.isCancelled {

@@ -91,8 +91,28 @@ final class MarkdownSyntaxHighlighter {
     ) async {
         guard let storage else { return }
         let style = Self.current
-        let newSpans = extractor.extract(from: source)
+        let allSpans = extractor.extract(from: source)
         let fullRange = NSRange(location: 0, length: (source as NSString).length)
+        // Honor `math: false` in front matter (#27) — when the
+        // document has opted out of math, the source editor should
+        // also stop tinting `$…$` / `$$…$$` ranges as math. The
+        // renderer already respects the flag via `MarkdownParser`;
+        // this just lines the editor up with the same view.
+        let mathDisabled = FrontMatterExtractor.extract(source)
+            .flatMap { $0.0["math"]?.lowercased() == "false" } ?? false
+        let newSpans: [SyntaxSpan]
+        if mathDisabled {
+            newSpans = allSpans.filter { span in
+                switch span.kind {
+                case .mathInline, .mathBlock, .mathFence:
+                    return false
+                default:
+                    return true
+                }
+            }
+        } else {
+            newSpans = allSpans
+        }
         codeBlockRanges = newSpans.compactMap { $0.kind == .codeBlock ? $0.range : nil }
         allCodeRanges = newSpans.compactMap { span in
             switch span.kind {

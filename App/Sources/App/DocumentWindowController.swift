@@ -23,6 +23,14 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     private weak var writDocument: WritDocument?
 
+    /// Debounce token for the expensive post-edit work (word count,
+    /// outline rebuild). Both are O(N) over the document and add a
+    /// solid 5–15 ms per keystroke on non-trivial docs — they don't
+    /// need to update every keystroke. Cancel + reschedule on each
+    /// edit; run after ~250 ms of quiet so the status bar / outline
+    /// catch up between bursts of typing.
+    private var deferredCountsTask: Task<Void, Never>?
+
     init(document: WritDocument) {
         self.writDocument = document
         self.editor = EditorViewController()
@@ -342,13 +350,53 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
 extension DocumentWindowController: @MainActor EditorViewControllerDelegate {
     func editor(_ controller: EditorViewController, didChangeText newText: String) {
+        let overall = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
+
+        // Cheap, immediate path: forward the source to the document
+        // (debounced renderer schedule lives there) and refresh the
+        // byte count. Both are O(1)-ish so cheap enough to stay sync
+        // on every keystroke. Line count and word count are now
+        // deferred because both are O(N) and visibly stall typing
+        // on large documents.
         writDocument?.applyEditorText(newText)
-        let words = newText.utf8.count < 1_000_000 ? DocumentSnapshot.wordCount(in: newText) : nil
-        statusBar.update(byteCount: newText.utf8.count, lineCount: newText.lineCountWrit, wordCount: words, status: nil)
-        // Only rebuild the outline when it's actually visible — saves a
-        // full AST walk per keystroke on long documents.
-        if !outlineSplitItem.isCollapsed {
-            outline.update(with: newText)
+        statusBar.update(byteCount: newText.utf8.count, lineCount: nil, wordCount: nil, status: nil)
+
+        // Debounced path: word count + line count + outline rebuild
+        // run after a typing pause so they don't add O(N) work to
+        // every keystroke. Cancel + reschedule on each edit so only
+        // the last burst's compute fires.
+        let outlineVisible = !outlineSplitItem.isCollapsed
+        deferredCountsTask?.cancel()
+        deferredCountsTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            if Task.isCancelled { return }
+            guard let self else { return }
+            let t0 = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
+            let lineCount = newText.lineCountWrit
+            if LatencyProbe.enabled {
+                let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+                LatencyProbe.log.info("  deferred lineCount \(ms, format: .fixed(precision: 2))ms")
+            }
+            let t1 = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
+            let words = newText.utf8.count < 1_000_000 ? DocumentSnapshot.wordCount(in: newText) : nil
+            if LatencyProbe.enabled {
+                let ms = (CFAbsoluteTimeGetCurrent() - t1) * 1000
+                LatencyProbe.log.info("  deferred wordCount \(ms, format: .fixed(precision: 2))ms")
+            }
+            self.statusBar.update(byteCount: newText.utf8.count, lineCount: lineCount, wordCount: words, status: nil)
+            if outlineVisible {
+                let t2 = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
+                self.outline.update(with: newText)
+                if LatencyProbe.enabled {
+                    let ms = (CFAbsoluteTimeGetCurrent() - t2) * 1000
+                    LatencyProbe.log.info("  deferred outline.update \(ms, format: .fixed(precision: 2))ms")
+                }
+            }
+        }
+
+        if LatencyProbe.enabled {
+            let ms = (CFAbsoluteTimeGetCurrent() - overall) * 1000
+            LatencyProbe.log.info("editor(didChangeText:) sync \(ms, format: .fixed(precision: 2))ms")
         }
     }
 

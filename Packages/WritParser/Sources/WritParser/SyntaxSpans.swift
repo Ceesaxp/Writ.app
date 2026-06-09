@@ -83,10 +83,12 @@ private struct Walker: MarkupWalker {
     let source: String
     var spans: [SyntaxSpan] = []
     private let nsSource: NSString
+    private let lineTable: LineTable
 
     init(source: String) {
         self.source = source
         self.nsSource = source as NSString
+        self.lineTable = LineTable(source: source)
     }
 
     mutating func visit(_ document: Document) {
@@ -213,25 +215,67 @@ private struct Walker: MarkupWalker {
     }
 
     private func utf16Offset(line: Int, column: Int) -> Int {
-        // cmark reports `column` as a 1-based UTF-8 byte position within the
-        // line, while NSTextStorage indexes by UTF-16 code units. Walk
-        // unicode scalars so we can advance the column by UTF-8 byte width
-        // while accumulating the UTF-16 offset.
-        var currentLine = 1
-        var currentColumnBytes = 1
-        var utf16Off = 0
-        for scalar in source.unicodeScalars {
-            if currentLine == line && currentColumnBytes == column { return utf16Off }
+        // cmark reports `column` as a 1-based UTF-8 byte position within
+        // the line; NSTextStorage indexes by UTF-16 code units. The line
+        // table pre-computes UTF-16 offsets of each line start (O(N) once
+        // per Walker), so this lookup is O(1) jump + a short walk that
+        // stays inside one line — replacing the previous O(doc) per-call
+        // scan that was 54% of typing-hang time on a 1000-line doc.
+        return lineTable.utf16Offset(line: line, column: column)
+    }
+}
+
+/// Maps cmark-style (line, UTF-8 byte column) coordinates to UTF-16
+/// offsets without re-walking the document on every call.
+///
+/// `Walker.utf16Offset` used to scan all scalars from the document start
+/// on every lookup. With many markdown nodes that becomes O(nodes × doc)
+/// per highlight pass — the dominant cost in the typing-latency hunt of
+/// 2026-06-09. The table is constructed once per parse: one O(N) walk
+/// records the UTF-16 offset and scalar index of each line start. Each
+/// subsequent lookup jumps to the right line in O(1) and walks only that
+/// line's bytes/scalars to refine the column.
+struct LineTable {
+    private let source: String
+    private let lineStartUtf16: [Int]
+    private let lineStartScalar: [String.UnicodeScalarView.Index]
+
+    init(source: String) {
+        self.source = source
+        var startsUtf16: [Int] = [0]
+        var startsScalar: [String.UnicodeScalarView.Index] = [source.unicodeScalars.startIndex]
+        var utf16 = 0
+        var idx = source.unicodeScalars.startIndex
+        let end = source.unicodeScalars.endIndex
+        while idx < end {
+            let scalar = source.unicodeScalars[idx]
+            utf16 += scalar.utf16.count
+            idx = source.unicodeScalars.index(after: idx)
             if scalar == "\n" {
-                if currentLine == line { return utf16Off } // end of target line
-                currentLine += 1
-                currentColumnBytes = 1
-                utf16Off += 1
-            } else {
-                currentColumnBytes += scalar.utf8.count
-                utf16Off += scalar.utf16.count
+                startsUtf16.append(utf16)
+                startsScalar.append(idx)
             }
         }
-        return utf16Off
+        self.lineStartUtf16 = startsUtf16
+        self.lineStartScalar = startsScalar
+    }
+
+    func utf16Offset(line: Int, column: Int) -> Int {
+        guard !lineStartUtf16.isEmpty else { return 0 }
+        let clampedLine = max(1, min(line, lineStartUtf16.count))
+        let lineIdx = clampedLine - 1
+        var utf16 = lineStartUtf16[lineIdx]
+        if column <= 1 { return utf16 }
+        var byteCol = 1
+        var idx = lineStartScalar[lineIdx]
+        let end = source.unicodeScalars.endIndex
+        while idx < end && byteCol < column {
+            let scalar = source.unicodeScalars[idx]
+            if scalar == "\n" { return utf16 }
+            byteCol += scalar.utf8.count
+            utf16 += scalar.utf16.count
+            idx = source.unicodeScalars.index(after: idx)
+        }
+        return utf16
     }
 }

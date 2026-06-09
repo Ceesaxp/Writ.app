@@ -15,7 +15,13 @@ public struct LargeDocumentMode: Sendable {
         public init(
             byteThreshold: Int = 1_000_000,
             lineThreshold: Int = 20_000,
-            debounceNormal: Duration = .milliseconds(250),
+            // 500ms is wider than typical inter-keystroke intervals at
+            // normal typing speed (3–5 chars/sec ≈ 200–333ms gaps).
+            // 250ms was firing a fresh parse after almost every single
+            // character because the debounce kept elapsing between
+            // strokes, which then hammered main with apply/IPC for every
+            // keystroke and produced the visible "waxy" typing feel.
+            debounceNormal: Duration = .milliseconds(500),
             debounceLarge: Duration = .milliseconds(1_500)
         ) {
             self.byteThreshold = byteThreshold
