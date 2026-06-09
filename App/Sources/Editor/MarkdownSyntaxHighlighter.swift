@@ -76,6 +76,12 @@ final class MarkdownSyntaxHighlighter {
     /// can target the right fragments.
     private(set) var codeBlockRanges: [NSRange] = []
 
+    /// All code ranges from the most recent highlight pass — inline
+    /// code (`` `…` ``) plus block code (` ``` `). Distinct from
+    /// `codeBlockRanges` because the spell-check filter (issue #1)
+    /// wants to skip checking inside any code, not just blocks.
+    private(set) var allCodeRanges: [NSRange] = []
+
     @MainActor
     func applyHighlight(
         to storage: NSTextStorage?,
@@ -88,6 +94,14 @@ final class MarkdownSyntaxHighlighter {
         let newSpans = extractor.extract(from: source)
         let fullRange = NSRange(location: 0, length: (source as NSString).length)
         codeBlockRanges = newSpans.compactMap { $0.kind == .codeBlock ? $0.range : nil }
+        allCodeRanges = newSpans.compactMap { span in
+            switch span.kind {
+            case .inlineCode, .codeBlock, .codeBlockFence, .codeBlockLang:
+                return span.range
+            default:
+                return nil
+            }
+        }
 
         // Decide the storage range that needs re-styling. For the first
         // highlight (or any full refresh) we touch everything; for an

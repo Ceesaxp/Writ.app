@@ -258,6 +258,32 @@ AST nodes inside the HTML emitter, so they don't touch source.
       avoid double-linking (tracked via `insideLink` state on the
       emitter).
 
+---
+
+## v0.4.12 — spell-check restraint — **DONE 2026-06-09**
+
+Third small drop toward 0.5.0. Bridges to the bigger themes + custom
+CSS work coming in the actual minor-version bump.
+
+- [x] **Close #1 — restrict spell checker in code.** New Settings
+      checkbox: **Skip spell check inside code (inline and fenced)**,
+      off by default. When on, the spell checker ignores any text
+      inside `` `…` `` and ` ``` …``` `. Implemented as two layers:
+      (1) `MarkdownSyntaxHighlighter.allCodeRanges` now exposes all
+      code spans (inline + block); the editor's `NSTextViewDelegate.
+      textView(_:didCheckTextIn:…)` filter drops spell-check results
+      that intersect them. (2) After each highlight pass — and on the
+      preference's toggle-ON — `clearSpellingStateInCodeRanges()`
+      walks the cached ranges and removes any squiggles that were
+      drawn before the highlighter detected the code. Goes through
+      `NSText.setSpellingState(_:range:)` and the TextKit 2
+      `NSTextLayoutManager.removeRenderingAttribute(.spellingState,
+      for:)` API — `.spellingState` is a *rendering* attribute, not a
+      storage attribute, so `NSTextStorage.removeAttribute` is the
+      wrong door. Toggling the preference OFF triggers
+      `textView.checkTextInDocument(nil)` to bring previously-
+      suppressed squiggles back.
+
 ## v0.5.0 — milestone scope (confirmed 2026-06-04)
 
 GitHub milestone "0.5.0" carries the post-0.4.8 issues. #11

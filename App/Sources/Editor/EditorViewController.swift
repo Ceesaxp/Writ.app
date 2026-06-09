@@ -56,6 +56,26 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         set { UserDefaults.standard.set(newValue, forKey: lineNumbersDefaultsKey) }
     }
 
+    /// Persisted preference for issue #1: when ON, the spell checker
+    /// ignores text inside inline code (`` `…` ``) and fenced code
+    /// blocks. Default OFF so existing behavior is preserved unless
+    /// the user opts in.
+    static let skipSpellCheckInCodeDefaultsKey = "WritSkipSpellCheckInCode"
+    static var skipSpellCheckInCodeEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: skipSpellCheckInCodeDefaultsKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: skipSpellCheckInCodeDefaultsKey)
+            NotificationCenter.default.post(name: EditorViewController.skipSpellCheckInCodeDidChange, object: nil)
+        }
+    }
+    static let skipSpellCheckInCodeDidChange = Notification.Name("org.ceesaxp.Writ.skipSpellCheckInCodeDidChange")
+
+    /// UTF-16 ranges that the spell-check filter should skip — inline
+    /// code + fenced code blocks. Updated after every highlight pass.
+    /// Used by `textView(_:didCheckTextIn:…)` to filter out spell-check
+    /// results that fall inside code.
+    private var spellCheckSkipRanges: [NSRange] = []
+
     override func loadView() {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
@@ -176,10 +196,62 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             name: EditorViewController.editorFontDidChange,
             object: nil
         )
+        // Re-run spell check when the "skip in code" preference flips
+        // so any stale red squiggles inside `code` get cleared
+        // (or, when turning the option off, restored).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(skipSpellCheckPreferenceDidChange(_:)),
+            name: EditorViewController.skipSpellCheckInCodeDidChange,
+            object: nil
+        )
     }
 
     @objc private func editorFontPreferenceDidChange(_ note: Notification) {
         applyFontPreference()
+    }
+
+    @objc private func skipSpellCheckPreferenceDidChange(_ note: Notification) {
+        if EditorViewController.skipSpellCheckInCodeEnabled {
+            // Going ON: clear any spelling-state attributes already
+            // drawn inside code ranges so existing red squiggles
+            // disappear immediately.
+            clearSpellingStateInCodeRanges()
+        } else {
+            // Going OFF: re-run spell check across the whole document
+            // so previously-suppressed code-range words come back as
+            // squiggles where appropriate.
+            textView.checkTextInDocument(nil)
+        }
+    }
+
+    /// Clears any spell-check squiggles already drawn on code ranges.
+    /// `.spellingState` is a *rendering* attribute (TextKit's temporary-
+    /// attribute side-channel), not a storage attribute — clearing it
+    /// has to go through `NSText.setSpellingState(_:range:)` or the
+    /// TextKit 2 layout manager's `removeRenderingAttribute(_:for:)`,
+    /// not `NSTextStorage.removeAttribute`. We call both so the work
+    /// lands whether the textView is on TextKit 1 or 2.
+    fileprivate func clearSpellingStateInCodeRanges() {
+        guard !spellCheckSkipRanges.isEmpty else { return }
+        let docLength = (textView.string as NSString).length
+        for range in spellCheckSkipRanges {
+            let clamped = NSIntersectionRange(range, NSRange(location: 0, length: docLength))
+            guard clamped.length > 0 else { continue }
+            // NSText API (works under either TextKit).
+            textView.setSpellingState(0, range: clamped)
+            // TextKit 2 rendering-attribute removal — belt-and-braces
+            // in case the NSText path doesn't propagate to the
+            // NSTextLayoutManager's rendering store.
+            if let tlm = textView.textLayoutManager {
+                let docStart = tlm.documentRange.location
+                if let start = tlm.location(docStart, offsetBy: clamped.location),
+                   let end = tlm.location(start, offsetBy: clamped.length),
+                   let textRange = NSTextRange(location: start, end: end) {
+                    tlm.removeRenderingAttribute(.spellingState, for: textRange)
+                }
+            }
+        }
     }
 
     private var lastScrollRatio: Double = 0
@@ -433,6 +505,28 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         return true
     }
 
+    /// Filter spell-check results so words inside code (inline or
+    /// fenced block) aren't flagged. Gated on the `skipSpellCheckInCode`
+    /// preference — when off, the original results pass through
+    /// untouched. Issue #1.
+    func textView(
+        _ textView: NSTextView,
+        didCheckTextIn range: NSRange,
+        types checkingTypes: NSTextCheckingTypes,
+        options: [NSSpellChecker.OptionKey: Any],
+        results: [NSTextCheckingResult],
+        orthography: NSOrthography,
+        wordCount: Int
+    ) -> [NSTextCheckingResult] {
+        guard Self.skipSpellCheckInCodeEnabled else { return results }
+        guard !spellCheckSkipRanges.isEmpty else { return results }
+        return results.filter { result in
+            !spellCheckSkipRanges.contains { skip in
+                NSIntersectionRange(skip, result.range).length > 0
+            }
+        }
+    }
+
     func textDidChange(_ notification: Notification) {
         guard !suppressDelegateBroadcast else { return }
         let text = textView.string
@@ -524,6 +618,15 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             // drawBackground pass can paint full-width fills.
             if let writTextView = self.textView as? WritTextView {
                 writTextView.codeBlockRanges = self.syntaxHighlighter.codeBlockRanges
+            }
+            // Stash all-code ranges for the spell-check skip filter.
+            self.spellCheckSkipRanges = self.syntaxHighlighter.allCodeRanges
+            if EditorViewController.skipSpellCheckInCodeEnabled {
+                // Clear any spell-check squiggles the spell checker
+                // may have drawn on code words *before* the highlighter
+                // detected the range (the spell checker can race ahead
+                // of our 80ms throttle on fresh typing).
+                self.clearSpellingStateInCodeRanges()
             }
         }
     }

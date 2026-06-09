@@ -15,6 +15,7 @@ final class PreferencesWindowController: NSWindowController {
     private let debounceNormalField = NSTextField()
     private let debounceLargeField = NSTextField()
     private let lineNumbersCheckbox = NSButton(checkboxWithTitle: "Show line numbers", target: nil, action: nil)
+    private let skipSpellCheckInCodeCheckbox = NSButton(checkboxWithTitle: "Skip spell check inside code (inline and fenced)", target: nil, action: nil)
     private let tocCheckbox = NSButton(checkboxWithTitle: "Include table of contents in HTML / PDF export", target: nil, action: nil)
     private let fontPopup = NSPopUpButton()
     private let paperSizePopup = NSPopUpButton()
@@ -23,7 +24,7 @@ final class PreferencesWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 450),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 476),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -66,6 +67,10 @@ final class PreferencesWindowController: NSWindowController {
         lineNumbersCheckbox.translatesAutoresizingMaskIntoConstraints = false
         lineNumbersCheckbox.target = self
         lineNumbersCheckbox.action = #selector(lineNumbersToggled(_:))
+
+        skipSpellCheckInCodeCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        skipSpellCheckInCodeCheckbox.target = self
+        skipSpellCheckInCodeCheckbox.action = #selector(skipSpellCheckInCodeToggled(_:))
 
         tocCheckbox.translatesAutoresizingMaskIntoConstraints = false
         tocCheckbox.target = self
@@ -128,6 +133,7 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(largeLabel)
         contentView.addSubview(debounceLargeField)
         contentView.addSubview(lineNumbersCheckbox)
+        contentView.addSubview(skipSpellCheckInCodeCheckbox)
         contentView.addSubview(tocCheckbox)
         contentView.addSubview(fontLabel)
         contentView.addSubview(fontPopup)
@@ -179,7 +185,10 @@ final class PreferencesWindowController: NSWindowController {
             lineNumbersCheckbox.topAnchor.constraint(equalTo: largeLabel.bottomAnchor, constant: 16),
             lineNumbersCheckbox.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
 
-            tocCheckbox.topAnchor.constraint(equalTo: lineNumbersCheckbox.bottomAnchor, constant: 6),
+            skipSpellCheckInCodeCheckbox.topAnchor.constraint(equalTo: lineNumbersCheckbox.bottomAnchor, constant: 6),
+            skipSpellCheckInCodeCheckbox.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+
+            tocCheckbox.topAnchor.constraint(equalTo: skipSpellCheckInCodeCheckbox.bottomAnchor, constant: 6),
             tocCheckbox.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
 
             fontLabel.topAnchor.constraint(equalTo: tocCheckbox.bottomAnchor, constant: 16),
@@ -223,6 +232,7 @@ final class PreferencesWindowController: NSWindowController {
         debounceNormalField.integerValue = Int(thresholds.debounceNormal.milliseconds)
         debounceLargeField.integerValue = Int(thresholds.debounceLarge.milliseconds)
         lineNumbersCheckbox.state = EditorViewController.lineNumbersEnabled ? .on : .off
+        skipSpellCheckInCodeCheckbox.state = EditorViewController.skipSpellCheckInCodeEnabled ? .on : .off
         tocCheckbox.state = ExportService.includeTOC ? .on : .off
         // Select the persisted font family if it's still in the menu,
         // otherwise fall back to "System Monospace".
@@ -273,6 +283,10 @@ final class PreferencesWindowController: NSWindowController {
         EditorViewController.lineNumbersEnabled = (sender.state == .on)
     }
 
+    @objc private func skipSpellCheckInCodeToggled(_ sender: NSButton) {
+        EditorViewController.skipSpellCheckInCodeEnabled = (sender.state == .on)
+    }
+
     @objc private func tocToggled(_ sender: NSButton) {
         ExportService.includeTOC = (sender.state == .on)
     }
@@ -280,6 +294,7 @@ final class PreferencesWindowController: NSWindowController {
     @objc private func restoreDefaults(_ sender: Any?) {
         LargeDocumentMode.Thresholds.default.persist()
         EditorViewController.lineNumbersEnabled = true
+        EditorViewController.skipSpellCheckInCodeEnabled = false
         EditorViewController.selectedFontFamily = nil
         ExportService.includeTOC = false
         ExportService.pdfPaperSize = .usLetter
