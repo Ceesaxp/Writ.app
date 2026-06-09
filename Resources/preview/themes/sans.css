@@ -1,0 +1,94 @@
+/* Sans modern theme — Inter / iA-Writer-ish.
+ *
+ * Modern sans body, airy spacing, soft contrast. Less assertive than
+ * the GitHub theme — better for long-form writing where you want the
+ * prose to dominate, not the chrome. Built on `../theme.css`.
+ */
+
+:root {
+  --writ-body-font: "Inter", "SF Pro Text", -apple-system, "Helvetica Neue", system-ui, sans-serif;
+  --writ-mono-font: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+  --writ-content-max: 64ch;
+  --writ-line-height: 1.7;
+  --writ-fg: #2a2d34;
+  --writ-fg-muted: #6a6f7a;
+  --writ-bg: #fdfdfc;
+  --writ-bg-alt: #f4f4f2;
+  --writ-border: #e3e3df;
+  --writ-link: #3a6ea5;
+  --writ-code-bg: #f1f0ec;
+  --writ-code-fg: #2a2d34;
+  --writ-blockquote-border: #d7d7d2;
+  --writ-blockquote-fg: #6a6f7a;
+  --writ-accent: #3a6ea5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --writ-fg: #d8dae0;
+    --writ-fg-muted: #9095a0;
+    --writ-bg: #17181c;
+    --writ-bg-alt: #1f2126;
+    --writ-border: #30333a;
+    --writ-link: #87b6e8;
+    --writ-code-bg: #1f2126;
+    --writ-code-fg: #d8dae0;
+    --writ-blockquote-border: #30333a;
+    --writ-blockquote-fg: #9095a0;
+    --writ-accent: #87b6e8;
+  }
+}
+
+html[data-writ-theme="sans"] body { font-size: 16px; }
+
+html[data-writ-theme="sans"] #writ-content {
+  margin: 3rem auto 5rem;
+  padding: 0 2rem;
+}
+
+html[data-writ-theme="sans"] h1,
+html[data-writ-theme="sans"] h2,
+html[data-writ-theme="sans"] h3,
+html[data-writ-theme="sans"] h4,
+html[data-writ-theme="sans"] h5,
+html[data-writ-theme="sans"] h6 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin-top: 2em;
+  margin-bottom: 0.5em;
+}
+
+html[data-writ-theme="sans"] h1 {
+  font-size: 1.95rem;
+  border-bottom: 0;
+  margin-top: 0.8em;
+}
+
+html[data-writ-theme="sans"] h2 {
+  font-size: 1.45rem;
+  border-bottom: 0;
+}
+
+html[data-writ-theme="sans"] h3 { font-size: 1.18rem; }
+
+html[data-writ-theme="sans"] p {
+  margin: 0 0 1.2em;
+}
+
+html[data-writ-theme="sans"] blockquote {
+  background: transparent;
+  border-left-width: 2px;
+  font-size: 0.97em;
+  color: var(--writ-fg-muted);
+}
+
+html[data-writ-theme="sans"] hr {
+  margin: 3em auto;
+  border: 0;
+  text-align: center;
+}
+html[data-writ-theme="sans"] hr::after {
+  content: "* * *";
+  color: var(--writ-fg-muted);
+  letter-spacing: 0.4em;
+}

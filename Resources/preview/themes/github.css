@@ -1,0 +1,20 @@
+/* GitHub theme — the default look.
+ *
+ * This file is intentionally near-empty: the base `theme.css` already
+ * defines the GitHub-flavored look (San Francisco / Helvetica body
+ * font, JetBrains-Mono code, blue links, light backgrounds, dark-mode
+ * variant via `prefers-color-scheme`).
+ *
+ * Each alternate theme in this directory (`serif.css`, `mono.css`,
+ * `sans.css`) overrides a subset of the `--writ-*` CSS variables and
+ * a handful of selectors. They cascade after the base stylesheet, so
+ * the structural rules (code blocks, alerts, math/mermaid containers,
+ * front-matter card, document header) stay consistent across themes.
+ *
+ * Identity rule so authoring tools / dev inspector show the active
+ * theme at the document root. No visual effect.
+ */
+
+html[data-writ-theme="github"] {
+  /* Sentinel — see comment above. */
+}

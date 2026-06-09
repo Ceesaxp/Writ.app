@@ -21,10 +21,13 @@ final class PreferencesWindowController: NSWindowController {
     private let paperSizePopup = NSPopUpButton()
     private let pdfFontScaleSlider = NSSlider(value: 85, minValue: 60, maxValue: 100, target: nil, action: nil)
     private let pdfFontScaleValueLabel = NSTextField(labelWithString: "85 %")
+    private let previewThemePopup = NSPopUpButton()
+    private let customCSSButton = NSButton(title: "Choose…", target: nil, action: nil)
+    private let customCSSLabel = NSTextField(labelWithString: "")
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 476),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 570),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -119,6 +122,33 @@ final class PreferencesWindowController: NSWindowController {
         pdfFontScaleValueLabel.textColor = .secondaryLabelColor
         pdfFontScaleValueLabel.alignment = .right
 
+        let previewThemeLabel = NSTextField(labelWithString: "Preview theme:")
+        previewThemeLabel.translatesAutoresizingMaskIntoConstraints = false
+        previewThemeLabel.font = NSFont.systemFont(ofSize: 13)
+
+        previewThemePopup.translatesAutoresizingMaskIntoConstraints = false
+        previewThemePopup.target = self
+        previewThemePopup.action = #selector(previewThemeChanged(_:))
+        for theme in PreviewTheme.allCases {
+            previewThemePopup.addItem(withTitle: theme.displayName)
+            previewThemePopup.lastItem?.representedObject = theme.rawValue
+        }
+
+        let customCSSHeading = NSTextField(labelWithString: "Custom preview CSS:")
+        customCSSHeading.translatesAutoresizingMaskIntoConstraints = false
+        customCSSHeading.font = NSFont.systemFont(ofSize: 13)
+
+        customCSSButton.translatesAutoresizingMaskIntoConstraints = false
+        customCSSButton.target = self
+        customCSSButton.action = #selector(chooseCustomCSS(_:))
+        customCSSButton.bezelStyle = .rounded
+
+        customCSSLabel.translatesAutoresizingMaskIntoConstraints = false
+        customCSSLabel.font = NSFont.systemFont(ofSize: 11)
+        customCSSLabel.textColor = .secondaryLabelColor
+        customCSSLabel.lineBreakMode = .byTruncatingMiddle
+        customCSSLabel.maximumNumberOfLines = 1
+
         let resetButton = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults(_:)))
         resetButton.translatesAutoresizingMaskIntoConstraints = false
         resetButton.bezelStyle = .rounded
@@ -142,6 +172,11 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(pdfFontScaleLabel)
         contentView.addSubview(pdfFontScaleSlider)
         contentView.addSubview(pdfFontScaleValueLabel)
+        contentView.addSubview(previewThemeLabel)
+        contentView.addSubview(previewThemePopup)
+        contentView.addSubview(customCSSHeading)
+        contentView.addSubview(customCSSButton)
+        contentView.addSubview(customCSSLabel)
         contentView.addSubview(resetButton)
 
         let row1Y = contentView.bottomAnchor
@@ -219,7 +254,26 @@ final class PreferencesWindowController: NSWindowController {
             pdfFontScaleValueLabel.leadingAnchor.constraint(equalTo: pdfFontScaleSlider.trailingAnchor, constant: 8),
             pdfFontScaleValueLabel.widthAnchor.constraint(equalToConstant: 48),
 
-            resetButton.topAnchor.constraint(equalTo: pdfFontScaleLabel.bottomAnchor, constant: 16),
+            previewThemeLabel.topAnchor.constraint(equalTo: pdfFontScaleLabel.bottomAnchor, constant: 14),
+            previewThemeLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            previewThemeLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            previewThemePopup.centerYAnchor.constraint(equalTo: previewThemeLabel.centerYAnchor),
+            previewThemePopup.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            previewThemePopup.widthAnchor.constraint(equalToConstant: 220),
+
+            customCSSHeading.topAnchor.constraint(equalTo: previewThemeLabel.bottomAnchor, constant: 12),
+            customCSSHeading.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            customCSSHeading.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            customCSSButton.centerYAnchor.constraint(equalTo: customCSSHeading.centerYAnchor),
+            customCSSButton.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+
+            customCSSLabel.topAnchor.constraint(equalTo: customCSSButton.bottomAnchor, constant: 4),
+            customCSSLabel.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            customCSSLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+
+            resetButton.topAnchor.constraint(equalTo: customCSSLabel.bottomAnchor, constant: 16),
             resetButton.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor)
         ])
         _ = row1Y
@@ -251,6 +305,20 @@ final class PreferencesWindowController: NSWindowController {
         let scale = ExportService.pdfFontScalePercent
         pdfFontScaleSlider.integerValue = scale
         pdfFontScaleValueLabel.stringValue = "\(scale) %"
+
+        let currentTheme = PreviewAppearance.theme.rawValue
+        let themeMatch = previewThemePopup.itemArray.firstIndex {
+            ($0.representedObject as? String) == currentTheme
+        }
+        previewThemePopup.selectItem(at: themeMatch ?? 0)
+
+        if let url = PreviewAppearance.customCSSURL {
+            customCSSLabel.stringValue = url.lastPathComponent
+            customCSSButton.title = "Clear"
+        } else {
+            customCSSLabel.stringValue = "(none — uses the theme as-is)"
+            customCSSButton.title = "Choose…"
+        }
     }
 
     @objc private func fontFamilyChanged(_ sender: NSPopUpButton) {
@@ -291,6 +359,31 @@ final class PreferencesWindowController: NSWindowController {
         ExportService.includeTOC = (sender.state == .on)
     }
 
+    @objc private func previewThemeChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let theme = PreviewTheme(rawValue: raw) else { return }
+        PreviewAppearance.theme = theme
+    }
+
+    @objc private func chooseCustomCSS(_ sender: NSButton) {
+        if PreviewAppearance.customCSSURL != nil {
+            // Clear-on-second-press behavior — the button label flips
+            // to "Clear" in `loadFromDefaults` when a CSS is set.
+            PreviewAppearance.setCustomCSSURL(nil)
+            loadFromDefaults()
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "css")!]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Choose a CSS file to overlay on the active preview theme."
+        if panel.runModal() == .OK, let url = panel.url {
+            PreviewAppearance.setCustomCSSURL(url)
+            loadFromDefaults()
+        }
+    }
+
     @objc private func restoreDefaults(_ sender: Any?) {
         LargeDocumentMode.Thresholds.default.persist()
         EditorViewController.lineNumbersEnabled = true
@@ -299,6 +392,8 @@ final class PreferencesWindowController: NSWindowController {
         ExportService.includeTOC = false
         ExportService.pdfPaperSize = .usLetter
         ExportService.pdfFontScalePercent = ExportService.pdfFontScalePercentDefault
+        PreviewAppearance.theme = .github
+        PreviewAppearance.setCustomCSSURL(nil)
         loadFromDefaults()
     }
 }

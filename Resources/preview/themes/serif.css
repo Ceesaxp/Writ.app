@@ -1,0 +1,116 @@
+/* Serif theme — academic paper look.
+ *
+ * Charter / Iowan Old Style / Georgia for the body, justified text,
+ * generous leading, centered title block. Built on the base
+ * stylesheet (`../theme.css`); this overlay defines the typography
+ * and a few accent rules.
+ *
+ * Light + dark via `prefers-color-scheme: dark` below.
+ */
+
+:root {
+  --writ-body-font: "Iowan Old Style", "Charter", "Georgia", "Palatino", serif;
+  --writ-mono-font: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  --writ-content-max: 70ch;
+  --writ-line-height: 1.65;
+  --writ-fg: #1c1916;
+  --writ-fg-muted: #5a544c;
+  --writ-bg: #fbf9f4;
+  --writ-bg-alt: #f3efe6;
+  --writ-border: #d7d0c0;
+  --writ-link: #7a3e1a;
+  --writ-code-bg: #efeae0;
+  --writ-code-fg: #2a2520;
+  --writ-blockquote-border: #c9bfa9;
+  --writ-blockquote-fg: #5a544c;
+  --writ-accent: #7a3e1a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --writ-fg: #ece5d6;
+    --writ-fg-muted: #aea692;
+    --writ-bg: #21201b;
+    --writ-bg-alt: #2b2922;
+    --writ-border: #3b3830;
+    --writ-link: #c79870;
+    --writ-code-bg: #2b2922;
+    --writ-code-fg: #ece5d6;
+    --writ-blockquote-border: #3b3830;
+    --writ-blockquote-fg: #aea692;
+    --writ-accent: #c79870;
+  }
+}
+
+html[data-writ-theme="serif"] body { font-size: 16px; }
+
+html[data-writ-theme="serif"] #writ-content {
+  text-align: justify;
+  hyphens: auto;
+}
+
+html[data-writ-theme="serif"] h1,
+html[data-writ-theme="serif"] h2,
+html[data-writ-theme="serif"] h3,
+html[data-writ-theme="serif"] h4,
+html[data-writ-theme="serif"] h5,
+html[data-writ-theme="serif"] h6 {
+  font-weight: 700;
+  text-align: left;
+  letter-spacing: -0.005em;
+}
+
+html[data-writ-theme="serif"] h1 {
+  font-size: 2.2rem;
+  text-align: center;
+  border-bottom: 0;
+  margin-top: 0.5em;
+  margin-bottom: 0.6em;
+}
+
+html[data-writ-theme="serif"] h2 {
+  font-size: 1.55rem;
+  border-bottom: 1px solid var(--writ-border);
+}
+
+html[data-writ-theme="serif"] .writ-doc-header {
+  text-align: center;
+  border-bottom: 1px solid var(--writ-border);
+  margin-bottom: 2em;
+  padding-bottom: 1.2em;
+}
+
+html[data-writ-theme="serif"] .writ-doc-title {
+  font-size: 2.4rem;
+  margin-bottom: 0.3em;
+}
+
+html[data-writ-theme="serif"] .writ-doc-meta {
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+
+html[data-writ-theme="serif"] blockquote {
+  font-style: italic;
+  padding: 0.2em 1.4em;
+  border-left-width: 2px;
+  background: transparent;
+}
+
+html[data-writ-theme="serif"] code,
+html[data-writ-theme="serif"] pre,
+html[data-writ-theme="serif"] .writ-mermaid,
+html[data-writ-theme="serif"] .writ-math-block,
+html[data-writ-theme="serif"] .writ-math-inline {
+  font-family: var(--writ-mono-font);
+}
+
+/* Drop-cap-ish first paragraph after the document title — keeps the
+   academic-paper feel without being too theatrical. */
+html[data-writ-theme="serif"] .writ-doc-header + p::first-letter {
+  font-size: 2.4em;
+  line-height: 0.9;
+  float: left;
+  padding: 0.05em 0.08em 0 0;
+  font-weight: 700;
+}

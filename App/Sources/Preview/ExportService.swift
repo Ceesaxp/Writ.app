@@ -70,12 +70,19 @@ enum ExportService {
     /// wraps it with the bundled CSS, and writes the result to `url`. Falls
     /// back to the parser output if the preview can't be captured.
     static func exportHTML(preview: PreviewViewController, parsed: ParsedDocument?, source: String, theme: String, to url: URL) {
-        // All three stylesheets the live preview relies on must be inlined so
+        // All the stylesheets the live preview relies on must be inlined so
         // the export renders identically without external assets:
-        //   - theme.css   editor typography, table, blockquote, etc.
-        //   - katex.css   math glyph fonts and spacing
-        //   - github.css  highlight.js colour scheme for code blocks
-        let css = bundledCSS() + "\n" + katexCSS() + "\n" + highlightCSS() + "\n" + tocCSS()
+        //   - theme.css         base structure (code blocks, alerts, etc.)
+        //   - themes/<name>.css the active preview theme overlay
+        //   - katex.css         math glyph fonts and spacing
+        //   - github.css        highlight.js colour scheme for code blocks
+        //   - custom CSS        the user's override (issue #6) if set
+        let css = bundledCSS()
+            + "\n" + activeThemeCSS()
+            + "\n" + userCustomCSS()
+            + "\n" + katexCSS()
+            + "\n" + highlightCSS()
+            + "\n" + tocCSS()
         let toc = includeTOC ? TOCBuilder.render(from: source) : ""
         let header = DocumentHeaderBuilder.render(frontMatter: parsed?.frontMatter)
         let title = parsed?.frontMatter?["title"] ?? "Writ Export"
@@ -139,6 +146,30 @@ enum ExportService {
             return ""
         }
         return (try? String(contentsOf: cssURL, encoding: .utf8)) ?? ""
+    }
+
+    /// CSS for the user's active preview theme overlay (`Resources/
+    /// preview/themes/<name>.css`). Empty when the bundle lookup fails.
+    private static func activeThemeCSS() -> String {
+        let name = PreviewAppearance.theme.rawValue
+        let subdir = "preview/themes"
+        guard let url = Bundle.main.url(forResource: name, withExtension: "css", subdirectory: subdir)
+                ?? Bundle.main.url(forResource: "\(subdir)/\(name)", withExtension: "css") else {
+            return ""
+        }
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    /// Contents of the user's custom CSS file (#6) if configured —
+    /// empty otherwise.
+    private static func userCustomCSS() -> String {
+        guard let url = PreviewAppearance.customCSSURL else { return "" }
+        // Custom CSS may live outside the app sandbox; use the
+        // security-scoped resource bookmark we persisted.
+        var accessed = false
+        if url.startAccessingSecurityScopedResource() { accessed = true }
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
 
     /// KaTeX rendered HTML references KaTeX stylesheet classes — bundle it

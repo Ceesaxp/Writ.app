@@ -284,25 +284,44 @@ CSS work coming in the actual minor-version bump.
       `textView.checkTextInDocument(nil)` to bring previously-
       suppressed squiggles back.
 
-## v0.5.0 — milestone scope (confirmed 2026-06-04)
+## v0.5.0 — alternative preview themes + custom CSS — **DONE 2026-06-09**
 
-GitHub milestone "0.5.0" carries the post-0.4.8 issues. #11
-(workspace/project) moved to 1.0.0 — too big to gate 0.5 on.
+The headline minor-version bump. Closes the last two issues on the
+0.5.0 milestone — preview-pane theming and the user-CSS escape hatch.
 
-- [ ] **#22** — folded into 0.4.8 above.
-- [ ] **#21** — Autolink bare URLs (GFM-style). Small. Likely a
-      single `cmark` flag + an inline-text regex pass for cases
-      cmark misses. Verify against `http://example.com.` (trailing
-      dot must not be eaten) and Markdown autolinks `<…>` (keep
-      working).
-- [ ] **#19** — Alternative preview themes (serif / mono / sans,
-      light + dark). Larger. Needs a theme bundle layout under
-      `Resources/preview/themes/`, a Settings picker, and the JS
-      bridge to swap stylesheets without a full reload.
-- [ ] **#6** — Allow / bundle custom CSS for Preview. File-picker
-      based — user points at a `.css`, we load it after the bundled
-      theme. Should hot-reload on file change (FSEvents already in
-      the codebase for folder watching).
+- [x] **Close #19 — alternative preview themes.** Refactored the
+      preview stylesheet so `theme.css` keeps the structural rules
+      (code blocks, alerts, math/mermaid containers, front-matter
+      card, doc-header) while a separate overlay in
+      `Resources/preview/themes/` defines the typography and palette.
+      Four themes ship: `github.css` (default, sentinel-only since
+      `theme.css` carries the GitHub look), `serif.css` (Iowan Old
+      Style, justified body, centered title block, drop-cap on the
+      first paragraph after a doc-header), `mono.css` (SF Mono
+      throughout, dashed dividers, man-page heading feel), and
+      `sans.css` (Inter/SF Pro, airy spacing, ornamental `* * *`
+      thematic break). Each has explicit light + dark via
+      `prefers-color-scheme: dark`. New JS bridge function
+      `window.Writ.setPreviewTheme(name)` swaps the
+      `<link id="writ-theme">` href live; the Swift side observes
+      `PreviewAppearance.didChange` and re-applies on the open
+      preview pane without a document reload. HTML/PDF exports
+      inline the active theme alongside the base CSS so the
+      exported file matches the visible preview.
+
+- [x] **Close #6 — custom CSS for preview.** Settings picks an
+      arbitrary `.css` file via NSOpenPanel; the URL is persisted
+      as a security-scoped bookmark so the choice survives sandbox
+      restarts. The file's contents are inlined into the preview as
+      a `<style id="writ-custom-style">` element managed by the
+      JS bridge (`window.Writ.setCustomCSS(content)`) — inlining
+      rather than `<link>`-ing avoids the cross-origin file:// load
+      issues sandboxed WKWebViews trip over. Exports inline the same
+      contents.
+
+      Open follow-up: FSEvents-driven hot reload on file change
+      (currently the user has to re-pick the file to pick up edits
+      they made externally). Small; can land as 0.5.1.
 
 ### Deferred from 0.5.0 to 1.0.0 (2026-06-04)
 

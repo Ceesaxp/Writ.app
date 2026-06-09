@@ -87,6 +87,61 @@ final class PreviewViewController: NSViewController {
             hasIssuedLoad = true
             loadShell()
         }
+        // Watch for theme / custom-CSS preference changes so the
+        // preview pane re-applies live without needing a doc reload.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(previewAppearanceDidChange(_:)),
+            name: PreviewAppearance.didChange,
+            object: nil
+        )
+    }
+
+    @objc private func previewAppearanceDidChange(_ note: Notification) {
+        applyPreviewAppearance()
+    }
+
+    /// Push the active preview theme + the user's custom CSS contents
+    /// down to the JS bridge. Safe to call before the bridge is ready
+    /// (guarded on `isReady`); `didReceiveMessage("ready")` calls this
+    /// explicitly so the initial render uses the right look.
+    fileprivate func applyPreviewAppearance() {
+        guard isReady else { return }
+        let theme = PreviewAppearance.theme.rawValue
+        let themeJS = "window.Writ && window.Writ.setPreviewTheme && window.Writ.setPreviewTheme('\(theme)')"
+        webView.evaluateJavaScript(themeJS, completionHandler: nil)
+
+        // Inline the user's custom CSS contents (issue #6). The file
+        // lives outside the sandbox in most cases; we read it via the
+        // security-scoped bookmark and ship the text into a `<style>`
+        // element managed by the JS bridge.
+        let css = readUserCustomCSS()
+        let json = serializeForJS(css)
+        let customJS = "window.Writ && window.Writ.setCustomCSS && window.Writ.setCustomCSS(\(json))"
+        webView.evaluateJavaScript(customJS, completionHandler: nil)
+    }
+
+    private func readUserCustomCSS() -> String {
+        guard let url = PreviewAppearance.customCSSURL else { return "" }
+        var accessed = false
+        if url.startAccessingSecurityScopedResource() { accessed = true }
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    /// JSON-encode a string so it can be safely embedded in a JS call.
+    /// We use `JSONSerialization` to handle all the edge cases (quotes,
+    /// newlines, control characters, unicode) rather than rolling our own.
+    private func serializeForJS(_ string: String) -> String {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: [string], options: [.fragmentsAllowed])
+            // `[string]` produces "[…]" — strip the brackets to get the
+            // bare JSON-encoded string.
+            if let s = String(data: data, encoding: .utf8), s.hasPrefix("["), s.hasSuffix("]") {
+                return String(s.dropFirst().dropLast())
+            }
+        } catch {}
+        return "\"\""
     }
 
     deinit {
@@ -151,6 +206,10 @@ final class PreviewViewController: NSViewController {
         case "ready":
             previewLog.notice("JS ready, pendingPayload=\(self.pendingPayload != nil ? "yes" : "no")")
             isReady = true
+            // Push the active preview theme + custom CSS as soon as
+            // the JS bridge is up, so the very first render uses the
+            // right look (no flash from default → user theme).
+            applyPreviewAppearance()
             onReady?()
             if let pending = pendingPayload {
                 pendingPayload = nil
