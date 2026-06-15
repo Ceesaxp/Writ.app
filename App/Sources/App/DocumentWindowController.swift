@@ -7,7 +7,37 @@ private let dwcLog = Logger(subsystem: "org.ceesaxp.Writ", category: "window")
 /// Owns the window, the split-view layout, and the wiring between editor,
 /// preview, and the document. One controller per document window.
 final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
-    enum LayoutMode: String { case source, preview, split }
+    enum LayoutMode: String, CaseIterable { case source, preview, split }
+
+    /// UserDefaults-backed default layout for newly-opened windows.
+    /// `source` is the conservative default — opens fast and matches the
+    /// "writing first, preview on demand" model.
+    private static let defaultLayoutDefaultsKey = "WritDefaultLayoutMode"
+    static var defaultLaunchLayout: LayoutMode {
+        get {
+            let raw = UserDefaults.standard.string(forKey: defaultLayoutDefaultsKey)
+            return raw.flatMap(LayoutMode.init(rawValue:)) ?? .source
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: defaultLayoutDefaultsKey)
+        }
+    }
+
+    /// UserDefaults-backed divider fraction (editor width / editing-area
+    /// width) for split mode. Replaces `NSSplitView.autosaveName`, which
+    /// crashed on macOS Sequoia when display geometry changed during sleep
+    /// (`-[__NSSetM copy]` from inside `_autosaveSubviewLayoutIfNecessary`,
+    /// reproducer 2026-06-10 wake-up crash).
+    private static let splitFractionDefaultsKey = "WritEditorPreviewSplitFraction"
+    static var editorPreviewSplitFraction: Double {
+        get {
+            let v = UserDefaults.standard.double(forKey: splitFractionDefaultsKey)
+            return v > 0 ? v : 0.5
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: splitFractionDefaultsKey)
+        }
+    }
 
     let editor: EditorViewController
     let preview: PreviewViewController
@@ -16,7 +46,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let splitController: NSSplitViewController
     private let containerController: NSViewController
     private var outlineSplitItem: NSSplitViewItem!
-    private(set) var layoutMode: LayoutMode = .split
+    private(set) var layoutMode: LayoutMode = DocumentWindowController.defaultLaunchLayout
 
     private let toolbarIdentifier = NSToolbar.Identifier("WritToolbar")
     private let layoutItemIdentifier = NSToolbarItem.Identifier("WritLayoutMode")
@@ -42,7 +72,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         let split = splitController.splitView
         split.dividerStyle = .paneSplitter
         split.isVertical = true
-        split.autosaveName = "WritEditorPreviewSplit"
+        // Deliberately no `autosaveName` — AppKit's NSSplitView autosave
+        // path crashes on macOS Sequoia when display configuration changes
+        // during sleep/wake. We persist the divider fraction ourselves via
+        // `editorPreviewSplitFraction` and the resize notification below.
 
         let outlineItem = NSSplitViewItem(sidebarWithViewController: outline)
         outlineItem.minimumThickness = 180
@@ -63,6 +96,18 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         splitController.addSplitViewItem(outlineItem)
         splitController.addSplitViewItem(editorItem)
         splitController.addSplitViewItem(previewItem)
+
+        // Apply the persisted default-launch layout *before* the window
+        // first paints so users don't see a brief split-view flash before
+        // we collapse a pane.
+        switch DocumentWindowController.defaultLaunchLayout {
+        case .source:
+            previewItem.isCollapsed = true
+        case .preview:
+            editorItem.isCollapsed = true
+        case .split:
+            break
+        }
 
         let container = NSViewController()
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760))
@@ -103,6 +148,16 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
         window.delegate = self
         installToolbar(on: window)
+
+        // Persist the editor/preview divider position whenever the split
+        // view changes size, but only while in `.split` mode — otherwise
+        // the collapse animation transiently saves fraction 0 or 1.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(splitViewDidResize(_:)),
+            name: NSSplitView.didResizeSubviewsNotification,
+            object: splitController.splitView
+        )
 
         editor.delegate = self
         document.bridge.attach(preview: preview, statusBar: statusBar)
@@ -158,8 +213,26 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         // whichever thread releases the last reference; hop to main to clean
         // up. Capture the document weakly so we don't extend its lifetime
         // beyond what AppKit already keeps.
+        //
+        // Read isolated property *before* `removeObserver(self)` — Swift 6
+        // strict concurrency treats passing `self` to an external call as
+        // "copying self", after which isolated properties can no longer
+        // be accessed from a deinit.
         let doc = writDocument
+        NotificationCenter.default.removeObserver(self)
         Task { @MainActor in doc?.bridge.cancelAll() }
+    }
+
+    @objc private func splitViewDidResize(_ note: Notification) {
+        guard layoutMode == .split else { return }
+        let editorItem = splitController.splitViewItems[1]
+        let previewItem = splitController.splitViewItems[2]
+        let editorWidth = editorItem.viewController.view.bounds.width
+        let previewWidth = previewItem.viewController.view.bounds.width
+        let editingAreaWidth = editorWidth + previewWidth
+        guard editingAreaWidth > 0,
+              editorWidth > 0, previewWidth > 0 else { return }
+        Self.editorPreviewSplitFraction = Double(editorWidth / editingAreaWidth)
     }
 
     override func windowDidLoad() {
@@ -169,39 +242,26 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
-        // Force a balanced initial editor/preview split. If the user
-        // later drags the divider, NSSplitView's autosave records it;
-        // we only intervene when the current ratio looks like a
-        // default-imbalanced layout (editor < 35% of the editing area).
-        //
-        // Indices after the outline sidebar was prepended:
-        //   0 = outline (sidebar, often collapsed)
-        //   1 = editor
-        //   2 = preview
-        // Divider 0 sits between outline/editor; divider 1 sits between
-        // editor/preview. We want to balance editor↔preview, so probe
-        // item 1's width against (editor + preview) width and move
-        // divider 1.
+        // Restore the persisted editor/preview divider fraction. Only
+        // meaningful when the launch layout is `.split` — the other
+        // modes don't show both panes. Indices after the outline sidebar
+        // was prepended: 0 = outline (sidebar), 1 = editor, 2 = preview.
+        // Divider 1 sits between editor/preview.
+        guard layoutMode == .split else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.splitController.splitView.layoutSubtreeIfNeeded()
             let split = self.splitController.splitView
             let editorItem = self.splitController.splitViewItems[1]
             let previewItem = self.splitController.splitViewItems[2]
-            let editorWidth = editorItem.viewController.view.bounds.width
-            let previewWidth = previewItem.viewController.view.bounds.width
-            let editingAreaWidth = editorWidth + previewWidth
+            let editingAreaWidth =
+                editorItem.viewController.view.bounds.width
+                + previewItem.viewController.view.bounds.width
             guard editingAreaWidth > 0 else { return }
-            let ratio = editorWidth / editingAreaWidth
-            if ratio < 0.35 || ratio > 0.65 {
-                // Divider 1's position is measured from the split view's
-                // leading edge, so we anchor at the outline's trailing
-                // edge plus half the editing area.
-                let outlineWidth = self.splitController.splitViewItems[0].viewController.view.bounds.width
-                let dividerOffset = outlineWidth + editingAreaWidth * 0.5
-                split.setPosition(dividerOffset, ofDividerAt: 1)
-            }
-            _ = split // silence unused if the early-return path is taken
+            let fraction = Self.editorPreviewSplitFraction
+            let outlineWidth = self.splitController.splitViewItems[0].viewController.view.bounds.width
+            let dividerOffset = outlineWidth + editingAreaWidth * CGFloat(fraction)
+            split.setPosition(dividerOffset, ofDividerAt: 1)
         }
     }
 
@@ -246,7 +306,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         guard itemIdentifier == layoutItemIdentifier else { return nil }
         let item = NSToolbarItem(itemIdentifier: layoutItemIdentifier)
         let segmented = NSSegmentedControl(labels: ["Source", "Split", "Preview"], trackingMode: .selectOne, target: self, action: #selector(toolbarLayoutChanged(_:)))
-        segmented.selectedSegment = 1
+        segmented.selectedSegment = layoutMode == .source ? 0 : layoutMode == .split ? 1 : 2
         item.view = segmented
         item.label = "Layout"
         return item

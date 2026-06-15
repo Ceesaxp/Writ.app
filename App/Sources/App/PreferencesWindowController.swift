@@ -24,10 +24,11 @@ final class PreferencesWindowController: NSWindowController {
     private let previewThemePopup = NSPopUpButton()
     private let customCSSButton = NSButton(title: "Choose…", target: nil, action: nil)
     private let customCSSLabel = NSTextField(labelWithString: "")
+    private let defaultLayoutPopup = NSPopUpButton()
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 570),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 610),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -149,6 +150,18 @@ final class PreferencesWindowController: NSWindowController {
         customCSSLabel.lineBreakMode = .byTruncatingMiddle
         customCSSLabel.maximumNumberOfLines = 1
 
+        let defaultLayoutLabel = NSTextField(labelWithString: "Default layout:")
+        defaultLayoutLabel.translatesAutoresizingMaskIntoConstraints = false
+        defaultLayoutLabel.font = NSFont.systemFont(ofSize: 13)
+
+        defaultLayoutPopup.translatesAutoresizingMaskIntoConstraints = false
+        defaultLayoutPopup.target = self
+        defaultLayoutPopup.action = #selector(defaultLayoutChanged(_:))
+        for mode in DocumentWindowController.LayoutMode.allCases {
+            defaultLayoutPopup.addItem(withTitle: mode.displayName)
+            defaultLayoutPopup.lastItem?.representedObject = mode.rawValue
+        }
+
         let resetButton = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults(_:)))
         resetButton.translatesAutoresizingMaskIntoConstraints = false
         resetButton.bezelStyle = .rounded
@@ -177,6 +190,8 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(customCSSHeading)
         contentView.addSubview(customCSSButton)
         contentView.addSubview(customCSSLabel)
+        contentView.addSubview(defaultLayoutLabel)
+        contentView.addSubview(defaultLayoutPopup)
         contentView.addSubview(resetButton)
 
         let row1Y = contentView.bottomAnchor
@@ -273,7 +288,15 @@ final class PreferencesWindowController: NSWindowController {
             customCSSLabel.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
             customCSSLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
-            resetButton.topAnchor.constraint(equalTo: customCSSLabel.bottomAnchor, constant: 16),
+            defaultLayoutLabel.topAnchor.constraint(equalTo: customCSSLabel.bottomAnchor, constant: 14),
+            defaultLayoutLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            defaultLayoutLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            defaultLayoutPopup.centerYAnchor.constraint(equalTo: defaultLayoutLabel.centerYAnchor),
+            defaultLayoutPopup.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            defaultLayoutPopup.widthAnchor.constraint(equalToConstant: 160),
+
+            resetButton.topAnchor.constraint(equalTo: defaultLayoutLabel.bottomAnchor, constant: 16),
             resetButton.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor)
         ])
         _ = row1Y
@@ -319,6 +342,18 @@ final class PreferencesWindowController: NSWindowController {
             customCSSLabel.stringValue = "(none — uses the theme as-is)"
             customCSSButton.title = "Choose…"
         }
+
+        let currentLayout = DocumentWindowController.defaultLaunchLayout.rawValue
+        let layoutMatch = defaultLayoutPopup.itemArray.firstIndex {
+            ($0.representedObject as? String) == currentLayout
+        }
+        defaultLayoutPopup.selectItem(at: layoutMatch ?? 0)
+    }
+
+    @objc private func defaultLayoutChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let mode = DocumentWindowController.LayoutMode(rawValue: raw) else { return }
+        DocumentWindowController.defaultLaunchLayout = mode
     }
 
     @objc private func fontFamilyChanged(_ sender: NSPopUpButton) {
@@ -394,7 +429,18 @@ final class PreferencesWindowController: NSWindowController {
         ExportService.pdfFontScalePercent = ExportService.pdfFontScalePercentDefault
         PreviewAppearance.theme = .github
         PreviewAppearance.setCustomCSSURL(nil)
+        DocumentWindowController.defaultLaunchLayout = .source
         loadFromDefaults()
+    }
+}
+
+private extension DocumentWindowController.LayoutMode {
+    var displayName: String {
+        switch self {
+        case .source: return "Source"
+        case .preview: return "Preview"
+        case .split: return "Split"
+        }
     }
 }
 
