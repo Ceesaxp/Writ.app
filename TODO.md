@@ -327,3 +327,19 @@ The headline minor-version bump. Closes the last two issues on the
 
 - **#11** — Workspace / project file combination. Scope undefined
       and likely a feature of its own. Not gating 0.5.
+
+## Unreleased — editor comfort
+
+- [x] **Configurable source-view line height.** The editor's locked
+      paragraph height was pinned to the font's exact natural metrics
+      (`ascender + |descender| + leading`), which reads dense on long,
+      heavily-formatted docs. Introduced
+      `EditorViewController.lineHeightMultiple` (UserDefaults-backed,
+      default 1.25, clamped 1.0–1.5) applied as a fixed multiple so
+      `minimumLineHeight == maximumLineHeight` stays exact and the
+      highlighter's per-fragment font swaps can't shift line positions.
+      Preferences gets a stepped slider (1.00–1.50 in 0.05 steps);
+      changes post `editorLineHeightDidChange` and every open editor
+      re-applies live, same pattern as the editor-font preference. A
+      font change now also recomputes the locked height, since it
+      derives from the base font's metrics.

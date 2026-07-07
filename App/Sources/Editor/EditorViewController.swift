@@ -205,10 +205,24 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             name: EditorViewController.skipSpellCheckInCodeDidChange,
             object: nil
         )
+        // Apply source-view line-height changes live to every open editor.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(editorLineHeightPreferenceDidChange(_:)),
+            name: EditorViewController.editorLineHeightDidChange,
+            object: nil
+        )
     }
 
     @objc private func editorFontPreferenceDidChange(_ note: Notification) {
         applyFontPreference()
+        // Line height derives from the base font's metrics, so a font
+        // change must recompute the locked paragraph height as well.
+        applyLineHeightPreference()
+    }
+
+    @objc private func editorLineHeightPreferenceDidChange(_ note: Notification) {
+        applyLineHeightPreference()
     }
 
     @objc private func skipSpellCheckPreferenceDidChange(_ note: Notification) {
@@ -479,10 +493,61 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     /// of which font is set on its characters, so the layout stays stable.
     private static func fixedLineHeightParagraphStyle(for font: NSFont) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        let lineHeight = font.ascender + abs(font.descender) + font.leading
+        let naturalHeight = font.ascender + abs(font.descender) + font.leading
+        let lineHeight = naturalHeight * Self.lineHeightMultiple
         style.minimumLineHeight = lineHeight
         style.maximumLineHeight = lineHeight
         return style
+    }
+
+    static let lineHeightDefaultsKey = "WritEditorLineHeightMultiple"
+
+    /// Comfortable default — ~25% over the font's natural metrics.
+    static let lineHeightMultipleDefault: CGFloat = 1.25
+
+    /// Allowed range for the source-view line-height multiple. `1.0` is
+    /// the tight, default-metrics look; `1.5` is airy. Preferences steps
+    /// between these in 0.05 increments.
+    static let lineHeightMultipleRange: ClosedRange<CGFloat> = 1.0...1.5
+
+    /// Vertical breathing room applied on top of the font's natural line
+    /// height. Applied as a fixed multiple (not `lineHeightMultiple` on the
+    /// paragraph style) so `minimumLineHeight == maximumLineHeight` stays
+    /// exact and the highlighter's per-fragment font swaps can't shift line
+    /// positions. Persisted in UserDefaults; changes post
+    /// `editorLineHeightDidChange` so every open editor re-applies live.
+    static var lineHeightMultiple: CGFloat {
+        get {
+            guard UserDefaults.standard.object(forKey: lineHeightDefaultsKey) != nil else {
+                return lineHeightMultipleDefault
+            }
+            let raw = CGFloat(UserDefaults.standard.double(forKey: lineHeightDefaultsKey))
+            return min(lineHeightMultipleRange.upperBound, max(lineHeightMultipleRange.lowerBound, raw))
+        }
+        set {
+            let clamped = min(lineHeightMultipleRange.upperBound, max(lineHeightMultipleRange.lowerBound, newValue))
+            UserDefaults.standard.set(Double(clamped), forKey: lineHeightDefaultsKey)
+            NotificationCenter.default.post(name: editorLineHeightDidChange, object: nil)
+        }
+    }
+
+    static let editorLineHeightDidChange = Notification.Name("org.ceesaxp.Writ.editorLineHeightDidChange")
+
+    /// Re-apply the current line-height multiple to the live text view +
+    /// existing storage. Called from the line-height notification observer
+    /// (wired in viewWillAppear). Mirrors `applyFontPreference`: the
+    /// highlighter preserves `.paragraphStyle`, so re-adding the recomputed
+    /// style across the whole range is the single re-application point.
+    func applyLineHeightPreference() {
+        let style = Self.fixedLineHeightParagraphStyle(for: Self.editorFont())
+        if let storage = textView.textStorage {
+            let range = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            storage.addAttribute(.paragraphStyle, value: style, range: range)
+            storage.endEditing()
+        }
+        textView.defaultParagraphStyle = style
+        textView.typingAttributes[.paragraphStyle] = style
     }
 
     private func defaultAttributes() -> [NSAttributedString.Key: Any] {

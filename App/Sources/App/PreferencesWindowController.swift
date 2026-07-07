@@ -18,6 +18,8 @@ final class PreferencesWindowController: NSWindowController {
     private let skipSpellCheckInCodeCheckbox = NSButton(checkboxWithTitle: "Skip spell check inside code (inline and fenced)", target: nil, action: nil)
     private let tocCheckbox = NSButton(checkboxWithTitle: "Include table of contents in HTML / PDF export", target: nil, action: nil)
     private let fontPopup = NSPopUpButton()
+    private let lineHeightSlider = NSSlider(value: 1.25, minValue: 1.0, maxValue: 1.5, target: nil, action: nil)
+    private let lineHeightValueLabel = NSTextField(labelWithString: "1.25×")
     private let paperSizePopup = NSPopUpButton()
     private let pdfFontScaleSlider = NSSlider(value: 85, minValue: 60, maxValue: 100, target: nil, action: nil)
     private let pdfFontScaleValueLabel = NSTextField(labelWithString: "85 %")
@@ -28,7 +30,7 @@ final class PreferencesWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 610),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 648),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -93,6 +95,23 @@ final class PreferencesWindowController: NSWindowController {
             fontPopup.addItem(withTitle: family)
             fontPopup.lastItem?.representedObject = family
         }
+
+        let lineHeightLabel = NSTextField(labelWithString: "Line height:")
+        lineHeightLabel.translatesAutoresizingMaskIntoConstraints = false
+        lineHeightLabel.font = NSFont.systemFont(ofSize: 13)
+
+        lineHeightSlider.translatesAutoresizingMaskIntoConstraints = false
+        lineHeightSlider.isContinuous = true
+        lineHeightSlider.numberOfTickMarks = 11   // 1.00, 1.05, …, 1.50
+        lineHeightSlider.allowsTickMarkValuesOnly = true
+        lineHeightSlider.tickMarkPosition = .below
+        lineHeightSlider.target = self
+        lineHeightSlider.action = #selector(lineHeightChanged(_:))
+
+        lineHeightValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        lineHeightValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        lineHeightValueLabel.textColor = .secondaryLabelColor
+        lineHeightValueLabel.alignment = .right
 
         let paperSizeLabel = NSTextField(labelWithString: "PDF page size:")
         paperSizeLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -180,6 +199,9 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(tocCheckbox)
         contentView.addSubview(fontLabel)
         contentView.addSubview(fontPopup)
+        contentView.addSubview(lineHeightLabel)
+        contentView.addSubview(lineHeightSlider)
+        contentView.addSubview(lineHeightValueLabel)
         contentView.addSubview(paperSizeLabel)
         contentView.addSubview(paperSizePopup)
         contentView.addSubview(pdfFontScaleLabel)
@@ -249,7 +271,19 @@ final class PreferencesWindowController: NSWindowController {
             fontPopup.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
             fontPopup.widthAnchor.constraint(equalToConstant: 200),
 
-            paperSizeLabel.topAnchor.constraint(equalTo: fontLabel.bottomAnchor, constant: 10),
+            lineHeightLabel.topAnchor.constraint(equalTo: fontLabel.bottomAnchor, constant: 14),
+            lineHeightLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            lineHeightLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            lineHeightSlider.centerYAnchor.constraint(equalTo: lineHeightLabel.centerYAnchor),
+            lineHeightSlider.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            lineHeightSlider.widthAnchor.constraint(equalToConstant: 170),
+
+            lineHeightValueLabel.centerYAnchor.constraint(equalTo: lineHeightLabel.centerYAnchor),
+            lineHeightValueLabel.leadingAnchor.constraint(equalTo: lineHeightSlider.trailingAnchor, constant: 8),
+            lineHeightValueLabel.widthAnchor.constraint(equalToConstant: 48),
+
+            paperSizeLabel.topAnchor.constraint(equalTo: lineHeightLabel.bottomAnchor, constant: 14),
             paperSizeLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
             paperSizeLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
 
@@ -319,6 +353,10 @@ final class PreferencesWindowController: NSWindowController {
         }
         fontPopup.selectItem(at: matchIndex ?? 0)
 
+        let lineHeight = EditorViewController.lineHeightMultiple
+        lineHeightSlider.doubleValue = Double(lineHeight)
+        lineHeightValueLabel.stringValue = Self.formatLineHeight(lineHeight)
+
         let paperRaw = ExportService.pdfPaperSize.rawValue
         let paperMatch = paperSizePopup.itemArray.firstIndex {
             ($0.representedObject as? String) == paperRaw
@@ -358,6 +396,17 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func fontFamilyChanged(_ sender: NSPopUpButton) {
         EditorViewController.selectedFontFamily = sender.selectedItem?.representedObject as? String
+    }
+
+    @objc private func lineHeightChanged(_ sender: NSSlider) {
+        // Snap away float noise so 1.05 doesn't persist as 1.0499999.
+        let value = (sender.doubleValue * 20).rounded() / 20
+        EditorViewController.lineHeightMultiple = CGFloat(value)
+        lineHeightValueLabel.stringValue = Self.formatLineHeight(CGFloat(value))
+    }
+
+    private static func formatLineHeight(_ value: CGFloat) -> String {
+        String(format: "%.2f×", Double(value))
     }
 
     @objc private func paperSizeChanged(_ sender: NSPopUpButton) {
@@ -424,6 +473,7 @@ final class PreferencesWindowController: NSWindowController {
         EditorViewController.lineNumbersEnabled = true
         EditorViewController.skipSpellCheckInCodeEnabled = false
         EditorViewController.selectedFontFamily = nil
+        EditorViewController.lineHeightMultiple = EditorViewController.lineHeightMultipleDefault
         ExportService.includeTOC = false
         ExportService.pdfPaperSize = .usLetter
         ExportService.pdfFontScalePercent = ExportService.pdfFontScalePercentDefault
