@@ -165,7 +165,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         preview.documentDirectory = docDir
         document.bridge.documentDirectory = docDir
         preview.onPreviewScrolled = { [weak self] line in
-            self?.editor.scrollToSourceLine(line)
+            guard let self, self.layoutMode == .split else { return }
+            self.editor.scrollToSourceLine(line)
         }
         outline.onSelectHeading = { [weak self] heading in
             guard let self else { return }
@@ -380,6 +381,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     private func setLayout(_ mode: LayoutMode) {
+        let previous = layoutMode
         layoutMode = mode
         // Indices after the outline sidebar was prepended: 0 = outline,
         // 1 = editor, 2 = preview. The Source/Split/Preview switcher only
@@ -398,6 +400,31 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             previewItem.isCollapsed = false
         }
         updateToolbarSelection(for: mode)
+        alignRevealedPane(from: previous, to: mode)
+    }
+
+    /// One-shot cross-pane alignment when a layout switch reveals a
+    /// previously hidden pane. Continuous scroll sync only runs in
+    /// `.split`, so without this the revealed pane would show wherever
+    /// it was last left. A single alignment event can't ping-pong, and
+    /// aligning at switch time is indistinguishable from the old
+    /// "hidden pane follows every scroll" behavior — just without the
+    /// per-wheel-tick cost.
+    private func alignRevealedPane(from previous: LayoutMode, to mode: LayoutMode) {
+        switch (previous, mode) {
+        case (.source, .preview), (.source, .split):
+            let position = editor.currentScrollPosition()
+            preview.scrollToSourceLine(position.topLine, fallbackRatio: position.ratio)
+        case (.preview, .source), (.preview, .split):
+            preview.currentTopSourceLine { [weak self] line in
+                guard let self, let line else { return }
+                self.editor.scrollToSourceLine(line)
+            }
+        default:
+            // Same mode, or split → single pane: the surviving pane
+            // already holds the user's position.
+            break
+        }
     }
 
     private func updateToolbarSelection(for mode: LayoutMode) {
@@ -465,6 +492,11 @@ extension DocumentWindowController: @MainActor EditorViewControllerDelegate {
     }
 
     func editor(_ controller: EditorViewController, didScrollToRatio ratio: Double, topSourceLine: Int) {
+        // Continuous editor → preview sync only matters when both panes
+        // are visible; in source-only mode it would just burn a JS
+        // evaluation in the hidden WKWebView per wheel tick. A mode
+        // switch realigns the revealed pane once (see setLayout).
+        guard layoutMode == .split else { return }
         preview.scrollToSourceLine(topSourceLine, fallbackRatio: ratio)
     }
 }

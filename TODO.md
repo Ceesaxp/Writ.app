@@ -343,3 +343,32 @@ The headline minor-version bump. Closes the last two issues on the
       re-applies live, same pattern as the editor-font preference. A
       font change now also recomputes the locked height, since it
       derives from the base font's metrics.
+
+## Unreleased — editor bug fixes (diagnosed + fixed 2026-07-15)
+
+- [x] **Plain-text paste** — `WritTextView` pasted rich text (browser/chat
+      lists bring hanging-indent `NSParagraphStyle`s that the highlighter
+      deliberately never repairs → phantom hanging indents + per-paragraph
+      line-height drift). Fixed: `paste(_:)` overridden → `pasteAsPlainText`;
+      `typingAttributes`/`defaultParagraphStyle` seeded at setup;
+      `reloadSource()` routes through `setSource` (the `.string =` setter
+      styled the whole doc from caret typing attributes); highlighter now
+      reasserts the locked paragraph style over its scope as self-heal
+      (covers rich-text drag-and-drop too).
+- [x] **Scroll-sync echo fix** — replaced timer-based suppression (leaky
+      overlapping 250 ms windows in `writ.js`, 0.25 s `asyncAfter` in
+      `EditorViewController`) with an expected-position handshake on both
+      sides: a scroll landing where the pane was programmatically sent is
+      swallowed regardless of timing; any other position clears the
+      expectation and resumes broadcasting. Editor side clamps the target
+      origin up front because `setBoundsOrigin` notifies synchronously.
+- [x] **Continuous sync gated to Split mode** — no editor↔preview scroll
+      traffic in Source-only / Preview-only. `setLayout` now does a
+      one-shot alignment when a hidden pane is revealed: source→* pushes
+      `editor.currentScrollPosition()`; preview→* pulls
+      `window.Writ.currentTopLine()` (new) via
+      `PreviewViewController.currentTopSourceLine(completion:)`.
+      Split → single pane needs no alignment (surviving pane keeps its
+      position). Remaining known coarseness: preview→editor alignment
+      lands on block starts; fractional-position interpolation is a
+      possible follow-up polish.

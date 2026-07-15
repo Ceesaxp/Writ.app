@@ -327,6 +327,18 @@ final class PreviewViewController: NSViewController {
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
+    /// Asks the preview JS which source line is currently at the top of
+    /// its viewport. Used for the one-shot pane alignment when a layout
+    /// switch reveals the editor — continuous preview → editor sync only
+    /// runs in split mode.
+    func currentTopSourceLine(completion: @escaping (Int?) -> Void) {
+        guard isReady else { completion(nil); return }
+        let js = "window.Writ && window.Writ.currentTopLine ? window.Writ.currentTopLine() : null"
+        webView.evaluateJavaScript(js) { value, _ in
+            completion((value as? NSNumber)?.intValue)
+        }
+    }
+
     /// Asks the preview JS to return the current `#writ-content` innerHTML.
     /// Used by the HTML export pipeline so rendered math/mermaid output is
     /// captured in the export rather than the unrendered placeholders.

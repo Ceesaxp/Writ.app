@@ -149,9 +149,7 @@ final class MarkdownSyntaxHighlighter {
 
         storage.beginEditing()
         // Reset the styling attributes the highlighter manages — within
-        // the scope only. Keeping `.paragraphStyle` intact (it lives on
-        // every range from setSource and locks line height to suppress
-        // visual jitter from `.font` swaps).
+        // the scope only.
         storage.removeAttribute(.foregroundColor, range: scope)
         storage.removeAttribute(.backgroundColor, range: scope)
         storage.removeAttribute(.strikethroughStyle, range: scope)
@@ -161,6 +159,16 @@ final class MarkdownSyntaxHighlighter {
         }
         if let baseColor = baseAttributes[.foregroundColor] {
             storage.addAttribute(.foregroundColor, value: baseColor, range: scope)
+        }
+        // Reassert the locked-line-height paragraph style too. It lives
+        // on every range from setSource, but attributed text can still
+        // sneak in around the plain-text paste guard (e.g. rich-text
+        // drag-and-drop) carrying hanging indents and foreign line
+        // heights; re-adding the base style makes each highlight pass
+        // self-healing for paragraph attributes the same way it already
+        // is for fonts and colors.
+        if let baseParagraphStyle = baseAttributes[.paragraphStyle] {
+            storage.addAttribute(.paragraphStyle, value: baseParagraphStyle, range: scope)
         }
 
         let baseFont = (baseAttributes[.font] as? NSFont) ?? NSFont.systemFont(ofSize: 13)

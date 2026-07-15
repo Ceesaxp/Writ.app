@@ -44,6 +44,17 @@ final class WritTextView: NSTextView {
     /// YAML/TOML syntax for arrays, inline objects, and quoted values.
     private static let markdownOnlyAutoPairs: Set<String> = ["*", "_", "`", "$"]
 
+    /// Writ documents are plain Markdown — attributed content has no
+    /// meaning here. Left to its rich-text default, NSTextView imports
+    /// pasted RTF/HTML paragraph styles (browser lists arrive with
+    /// hanging-indent head indents, tab stops, and their own line
+    /// heights) which the syntax highlighter deliberately never
+    /// touches, so they'd persist as phantom indents and per-paragraph
+    /// line-height drift.
+    override func paste(_ sender: Any?) {
+        pasteAsPlainText(sender)
+    }
+
     override func insertText(_ string: Any, replacementRange: NSRange) {
         let start = LatencyProbe.enabled ? CFAbsoluteTimeGetCurrent() : 0
         defer {

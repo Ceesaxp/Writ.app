@@ -105,6 +105,14 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         textView.smartInsertDeleteEnabled = false
         textView.font = Self.editorFont()
         textView.textColor = .textColor
+        // Seed the locked-line-height paragraph style into the typing
+        // attributes from the start. Without this, any path that styles
+        // text from typing attributes before the user first moves the
+        // caret (`textView.string =` assignment, paste-as-plain-text
+        // into an empty document) would fall back to natural metrics
+        // and render with a different line height than setSource'd text.
+        textView.defaultParagraphStyle = Self.fixedLineHeightParagraphStyle(for: Self.editorFont())
+        textView.typingAttributes = defaultAttributes()
         textView.insertionPointColor = .controlAccentColor
         textView.usesFindBar = true
         textView.usesFindPanel = true
@@ -255,13 +263,28 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     }
 
     private var lastScrollRatio: Double = 0
+
+    /// Expected clip-view origin after a programmatic scroll. A scroll
+    /// notification whose origin matches this value is our own scroll
+    /// landing — swallowed so it can't echo back to the preview. Any
+    /// other origin means the user moved the view: clear the expectation
+    /// and resume broadcasting. Deterministic replacement for the old
+    /// fixed-delay suppression flag, whose overlapping 0.25 s timers
+    /// leaked during continuous wheel scrolling and let block-start
+    /// echoes snap the viewport backwards.
+    private var expectedScrollOriginY: CGFloat?
+
     @objc private func scrollViewDidScroll(_ note: Notification) {
-        if suppressScrollNotify { return }
         guard let contentView = scrollView.contentView as NSClipView? else { return }
+        let originY = contentView.bounds.origin.y
+        if let expected = expectedScrollOriginY {
+            if abs(originY - expected) < 2 { return }
+            expectedScrollOriginY = nil
+        }
         let docHeight = scrollView.documentView?.frame.height ?? 0
         let visibleHeight = contentView.bounds.height
         let scrollable = max(1, docHeight - visibleHeight)
-        let ratio = Double(contentView.bounds.origin.y / scrollable).clamped(to: 0...1)
+        let ratio = Double(originY / scrollable).clamped(to: 0...1)
         if abs(ratio - lastScrollRatio) < 0.005 { return }
         lastScrollRatio = ratio
         delegate?.editor(self, didScrollToRatio: ratio, topSourceLine: topVisibleSourceLine())
@@ -269,9 +292,8 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     /// Programmatically scroll so the given 1-indexed source line is at
     /// the top of the visible area. Used by the preview → editor scroll
-    /// sync. Suppresses the editor's own scroll notification while it
-    /// performs the scroll so the two panes don't ping-pong.
-    private var suppressScrollNotify = false
+    /// sync. Records the target origin so the resulting scroll
+    /// notification is recognised as our own and not re-broadcast.
     func scrollToSourceLine(_ line: Int) {
         guard let layoutManager = textView.layoutManager else { return }
         // Map 1-indexed line → UTF-16 offset → glyph → line-fragment frame.
@@ -293,13 +315,28 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             effectiveRange: nil
         )
         // lineFragmentRect is in container coords; translate to textView.
+        // Clamp to the scrollable range up front: setBoundsOrigin posts
+        // the bounds-changed notification synchronously, so the expected
+        // origin must equal where the clip view actually lands or our
+        // own scroll gets mis-classified as user input.
         let y = lineRect.minY + textView.textContainerOrigin.y
-        suppressScrollNotify = true
-        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: y))
+        let docHeight = scrollView.documentView?.frame.height ?? 0
+        let maxOriginY = max(0, docHeight - scrollView.contentView.bounds.height)
+        let targetY = min(max(0, y), maxOriginY)
+        expectedScrollOriginY = targetY
+        scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: targetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            self?.suppressScrollNotify = false
-        }
+    }
+
+    /// Current scroll position as (proportional ratio, 1-indexed top
+    /// source line). Used by the window controller's one-shot pane
+    /// alignment when a mode switch reveals the preview.
+    func currentScrollPosition() -> (ratio: Double, topLine: Int) {
+        let contentView = scrollView.contentView
+        let docHeight = scrollView.documentView?.frame.height ?? 0
+        let scrollable = max(1, docHeight - contentView.bounds.height)
+        let ratio = Double(contentView.bounds.origin.y / scrollable).clamped(to: 0...1)
+        return (ratio, topVisibleSourceLine())
     }
 
     /// Computes the 1-indexed source line at the top of the editor's
@@ -478,8 +515,13 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     }
 
     func reloadSource() {
-        textView.string = currentSource
-        scheduleHighlight()
+        // Route through setSource rather than `textView.string =` — the
+        // string setter styles the whole document from the caret's
+        // typing attributes, so a foreign paragraph style at the caret
+        // (e.g. inherited from previously pasted rich text) would
+        // spread document-wide. setSource rebuilds with the canonical
+        // default attributes.
+        setSource(currentSource)
     }
 
     /// Paragraph style with `minimumLineHeight == maximumLineHeight` locked
