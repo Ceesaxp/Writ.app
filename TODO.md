@@ -372,3 +372,31 @@ The headline minor-version bump. Closes the last two issues on the
       position). Remaining known coarseness: preview→editor alignment
       lands on block starts; fractional-position interpolation is a
       possible follow-up polish.
+
+## 0.5.5 — window sizing
+
+- [x] **Window ratchets wider on layout switch** (reported 2026-08-21) —
+      Source → Preview → Source grew the window by a whole editor pane,
+      repeatedly. Root cause: `setLayout(.source)` uncollapsed the editor
+      *before* collapsing the preview, so both panes were briefly
+      uncollapsed. A collapsed pane remembers the thickness it had when
+      collapsed — the full content width in a single-pane mode — so the
+      pair demanded ~2× the available width and NSSplitViewController
+      satisfied it by widening the window
+      (`-[NSSplitViewController _collapse:splitViewItem:animated:]` →
+      `-[NSWindow _changeWindowFrameFromConstraintsIfNecessary]`,
+      captured with an NSWindow `setFrame` probe). The window never
+      shrinks back, so it ratcheted on every switch; nothing to do with
+      the document being unsaved, and not the multi-monitor autosave
+      rescale theory that was on the branch.
+      Fix, in `DocumentWindowController`:
+      1. collapse the outgoing pane before uncollapsing the incoming one;
+      2. `collapseBehavior = .preferResizingSiblingsWithFixedSplitView` on
+         both panes (states the intent; the SDK header warns `.default`
+         "may change over time");
+      3. pin/restore `window.frame` across the whole mutation, since
+         entering Split legitimately needs both panes at once, then
+         re-apply the persisted divider fraction.
+      Verified: 20 consecutive switches across every Source/Split/Preview
+      combination leave the frame byte-identical. The outline sidebar
+      still grows the window by its own width, which is intended.
