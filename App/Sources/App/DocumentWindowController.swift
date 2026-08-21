@@ -88,10 +88,19 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         let editorItem = NSSplitViewItem(viewController: editor)
         editorItem.minimumThickness = 280
         editorItem.holdingPriority = .defaultLow
+        // The editor and preview are alternates within one editing area, so
+        // collapsing either must resize its sibling, never the split view
+        // (and with it the window). Left at `.default` AppKit resolves this
+        // to `preferResizingSplitViewWithFixedSiblings` — see `setLayout`
+        // for how that ratcheted the window wider on every mode switch.
+        // The header notes the `.default` mapping "may change over time",
+        // which is reason enough to state the intent explicitly.
+        editorItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
 
         let previewItem = NSSplitViewItem(viewController: preview)
         previewItem.minimumThickness = 280
         previewItem.holdingPriority = .defaultLow
+        previewItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
 
         splitController.addSplitViewItem(outlineItem)
         splitController.addSplitViewItem(editorItem)
@@ -245,25 +254,30 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         super.showWindow(sender)
         // Restore the persisted editor/preview divider fraction. Only
         // meaningful when the launch layout is `.split` — the other
-        // modes don't show both panes. Indices after the outline sidebar
-        // was prepended: 0 = outline (sidebar), 1 = editor, 2 = preview.
-        // Divider 1 sits between editor/preview.
+        // modes don't show both panes.
         guard layoutMode == .split else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.splitController.splitView.layoutSubtreeIfNeeded()
-            let split = self.splitController.splitView
-            let editorItem = self.splitController.splitViewItems[1]
-            let previewItem = self.splitController.splitViewItems[2]
-            let editingAreaWidth =
-                editorItem.viewController.view.bounds.width
-                + previewItem.viewController.view.bounds.width
-            guard editingAreaWidth > 0 else { return }
-            let fraction = Self.editorPreviewSplitFraction
-            let outlineWidth = self.splitController.splitViewItems[0].viewController.view.bounds.width
-            let dividerOffset = outlineWidth + editingAreaWidth * CGFloat(fraction)
-            split.setPosition(dividerOffset, ofDividerAt: 1)
+            self?.applyPersistedSplitFraction()
         }
+    }
+
+    /// Place the editor/preview divider at the persisted fraction.
+    /// Indices after the outline sidebar was prepended: 0 = outline
+    /// (sidebar), 1 = editor, 2 = preview. Divider 1 sits between the
+    /// editor and the preview.
+    private func applyPersistedSplitFraction() {
+        splitController.splitView.layoutSubtreeIfNeeded()
+        let split = splitController.splitView
+        let editorItem = splitController.splitViewItems[1]
+        let previewItem = splitController.splitViewItems[2]
+        let editingAreaWidth =
+            editorItem.viewController.view.bounds.width
+            + previewItem.viewController.view.bounds.width
+        guard editingAreaWidth > 0 else { return }
+        let fraction = Self.editorPreviewSplitFraction
+        let outlineWidth = splitController.splitViewItems[0].viewController.view.bounds.width
+        let dividerOffset = outlineWidth + editingAreaWidth * CGFloat(fraction)
+        split.setPosition(dividerOffset, ofDividerAt: 1)
     }
 
     func applyLoadedSource() {
@@ -388,10 +402,35 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         // touches editor and preview; the outline visibility is independent.
         let editorItem = splitController.splitViewItems[1]
         let previewItem = splitController.splitViewItems[2]
+
+        // Switching layout mode must never change the window's size. A
+        // collapsed pane remembers the thickness it had when it was
+        // collapsed, which in a single-pane mode is the full content
+        // width. Uncollapsing it while a sibling is still visible
+        // therefore asks for roughly twice the available width, and
+        // NSSplitViewController grants it by widening the *window*:
+        //   -[NSSplitViewController _collapse:splitViewItem:animated:…]
+        //   -> -[NSWindow layoutIfNeeded]
+        //   -> -[NSWindow _changeWindowFrameFromConstraintsIfNecessary]
+        // The window never shrinks back, so it ratcheted wider on every
+        // switch (reported 2026-08-21: Source -> Preview -> Source grows
+        // the window by a whole pane, repeatedly).
+        //
+        // Two defenses. First, collapse the outgoing pane *before*
+        // uncollapsing the incoming one, so Source/Preview never have a
+        // transient where both are uncollapsed. Second, entering Split
+        // legitimately needs both panes at once, so pin the frame across
+        // the mutation and put it back if AppKit moved it.
+        //
+        // Toggling the outline sidebar goes through `toggleOutline` and is
+        // deliberately *not* covered — growing the window to make room for
+        // a sidebar is standard macOS behavior.
+        let frameBeforeSwitch = window?.frame
+
         switch mode {
         case .source:
-            editorItem.isCollapsed = false
             previewItem.isCollapsed = true
+            editorItem.isCollapsed = false
         case .preview:
             editorItem.isCollapsed = true
             previewItem.isCollapsed = false
@@ -399,6 +438,17 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             editorItem.isCollapsed = false
             previewItem.isCollapsed = false
         }
+
+        if let window, let before = frameBeforeSwitch, window.frame.size != before.size {
+            window.setFrame(before, display: true)
+        }
+        // Both panes were just uncollapsed at their remembered (full-width)
+        // thicknesses; put the divider back at the user's fraction so the
+        // restored frame doesn't leave one pane pinned to its minimum.
+        if mode == .split {
+            applyPersistedSplitFraction()
+        }
+
         updateToolbarSelection(for: mode)
         alignRevealedPane(from: previous, to: mode)
     }
