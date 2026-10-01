@@ -821,7 +821,8 @@ final class PreviewNavigationHelper: NSObject, WKNavigationDelegate {
 
 }
 
-/// NSObject target used by `NSPrintOperation.runModal(for:delegate:didRun:contextInfo:)`.
+/// Plain NSObject script-message target — same reason as `PreviewNavigationHelper`:
+/// the view controller doesn't conform to `WKScriptMessageHandler` itself.
 final class PreviewMessageHelper: NSObject, WKScriptMessageHandler {
     weak var owner: PreviewViewController?
 
@@ -830,31 +831,5 @@ final class PreviewMessageHelper: NSObject, WKScriptMessageHandler {
         let body = message.body as? [String: Any] ?? [:]
         let type = body["type"] as? String ?? "?"
         owner?.didReceiveMessage(type: type, body: body)
-    }
-}
-
-/// NSObject target used by `NSPrintOperation.runModal(for:delegate:didRun:contextInfo:)`.
-/// AppKit calls back via a fixed @objc selector when the print job finishes;
-/// we forward that into a Swift closure so the calling view controller can
-/// finish in idiomatic Swift.
-final class PrintCompletionHandler: NSObject {
-    private let target: URL
-    private let runStart: Date
-    private let heartbeat: DispatchSourceTimer
-    private let completion: (URL, Bool) -> Void
-
-    init(target: URL, runStart: Date, heartbeat: DispatchSourceTimer, completion: @escaping (URL, Bool) -> Void) {
-        self.target = target
-        self.runStart = runStart
-        self.heartbeat = heartbeat
-        self.completion = completion
-        super.init()
-    }
-
-    @objc func printOperationDidRun(_ printOperation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
-        let exists = FileManager.default.fileExists(atPath: target.path)
-        let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
-        previewLog.notice("[pdf] printOperationDidRun: success=\(success), exists=\(exists), size=\(size)")
-        completion(target, success && exists && size > 0)
     }
 }
