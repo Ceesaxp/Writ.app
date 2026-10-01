@@ -112,3 +112,19 @@ targets:
         ENABLE_PREVIEWS: YES
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: App/Info.plist
+  # Hostless unit-test bundle. Deliberately has no test host and no
+  # dependency on the Writ app target: launching the app would run
+  # `applicationDidFinishLaunching` → `NSDocumentController.newDocument`,
+  # spinning up a document window and a WKWebView. The production sources
+  # under test are compiled straight into the bundle instead.
+  WritTests:
+    type: bundle.unit-test
+    platform: macOS
+    settings:
+      base:
+        # The project-wide base sets PRODUCT_NAME: Writ, which would name the
+        # bundle Writ.xctest and give it the module name `Writ`.
+        PRODUCT_NAME: WritTests
+    sources:
+      - path: App/Tests
+      - path: App/Sources/Preview/PrintCompletionHandler.swift

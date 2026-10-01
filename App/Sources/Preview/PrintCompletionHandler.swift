@@ -35,6 +35,22 @@ final class PrintCompletionHandler: NSObject {
         let exists = FileManager.default.fileExists(atPath: target.path)
         let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
         previewLog.notice("[pdf] printOperationDidRun: success=\(success), exists=\(exists), size=\(size)")
-        completion(target, success && exists && size > 0)
+        let ok = success && exists && size > 0
+        // AppKit runs WKWebView's NSPrintOperation on a spawned secondary
+        // thread, so this callback arrives off-main. Everything downstream —
+        // the JS teardown calls and the createPDF fallback — is main-thread-only
+        // WebKit API, which WebKit answers by killing the process. Hop here, at
+        // the one boundary, and hop unconditionally so the callback timing is
+        // uniform rather than sometimes-sync-sometimes-async.
+        //
+        // `completion` is a plain, non-Sendable closure (it captures the view
+        // controller), so Swift 6 region isolation will not let it cross the
+        // queue boundary on its own. The hand-off is safe: the handler is used
+        // by exactly one print operation and the closure is only ever called
+        // here, once.
+        nonisolated(unsafe) let completion = self.completion
+        DispatchQueue.main.async { [target] in
+            completion(target, ok)
+        }
     }
 }
