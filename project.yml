@@ -128,3 +128,4 @@ targets:
     sources:
       - path: App/Tests
       - path: App/Sources/Preview/PrintCompletionHandler.swift
+      - path: App/Sources/Preview/OneShotWait.swift

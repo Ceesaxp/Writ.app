@@ -304,11 +304,6 @@ final class PreviewViewController: NSViewController {
         }
     }
 
-    func setMathRenderer(_ name: String) {
-        let js = "window.Writ && window.Writ.setMathRenderer('\(name)')"
-        webView.evaluateJavaScript(js, completionHandler: nil)
-    }
-
     func scrollToRatio(_ ratio: Double) {
         guard isReady else { return }
         let clamped = max(0, min(1, ratio))
