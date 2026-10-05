@@ -446,6 +446,13 @@ final class PreviewViewController: NSViewController {
         }
     }
 
+    /// Runs one of the export-only DOM injections below in the preview
+    /// document. All six had the same two-line shape; this is the single
+    /// place that shape lives now.
+    private func evaluateExportJS(_ js: String, completion: (() -> Void)? = nil) {
+        webView.evaluateJavaScript(js) { _, _ in completion?() }
+    }
+
     /// Inserts an export-only TOC block at the top of `#writ-content`.
     /// The block carries a sentinel id so `removePDFExportTOC` can
     /// take it out again after the print operation finishes.
@@ -463,7 +470,7 @@ final class PreviewViewController: NSViewController {
               root.insertBefore(holder, root.firstChild);
             })()
             """
-        webView.evaluateJavaScript(js) { _, _ in completion() }
+        evaluateExportJS(js, completion: completion)
     }
 
     private func removePDFExportTOC() {
@@ -473,7 +480,7 @@ final class PreviewViewController: NSViewController {
               if (el && el.parentNode) el.parentNode.removeChild(el);
             })()
             """
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        evaluateExportJS(js)
     }
 
     /// Inserts the export-only `<header class="writ-doc-header">` block
@@ -498,7 +505,7 @@ final class PreviewViewController: NSViewController {
               document.body.classList.add('writ-export');
             })()
             """
-        webView.evaluateJavaScript(js) { _, _ in completion() }
+        evaluateExportJS(js, completion: completion)
     }
 
     private func removePDFExportDocHeader() {
@@ -509,7 +516,7 @@ final class PreviewViewController: NSViewController {
               document.body.classList.remove('writ-export');
             })()
             """
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        evaluateExportJS(js)
     }
 
     /// Injects a `@media print { html { font-size: <pct>% } }` style tag
@@ -529,7 +536,7 @@ final class PreviewViewController: NSViewController {
               document.head.appendChild(style);
             })()
             """
-        webView.evaluateJavaScript(js) { _, _ in completion() }
+        evaluateExportJS(js, completion: completion)
     }
 
     private func removePDFExportFontScale() {
@@ -539,7 +546,7 @@ final class PreviewViewController: NSViewController {
               if (el && el.parentNode) el.parentNode.removeChild(el);
             })()
             """
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        evaluateExportJS(js)
     }
 
     private func exportPDFImpl(to url: URL) {
