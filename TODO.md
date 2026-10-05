@@ -427,6 +427,47 @@ The headline minor-version bump. Closes the last two issues on the
       byte-identical 5-page A4 PDFs with real text, and a screenshot
       burst across the export shows no visible window change.
 
+- [x] **Hardening from the adversarial review of the above** — the
+      Source-only fix introduced a multi-second wait between accepting the
+      save panel and printing, which made several latent paths reachable:
+      1. the modal host window came from `NSApplication.shared.mainWindow`,
+         nil while the app is inactive, and the nil branch called
+         `op.run()` — a permanent main-thread deadlock. The document
+         window is now threaded down as a non-optional and that branch is
+         deleted. With two documents open `mainWindow` could also resolve
+         to the *other* document's window;
+      2. one shared wait token meant a second export retired the first's
+         completion without calling it — no file, no failure report, and a
+         chained `onReady` closure left installed forever, closing a
+         retain cycle through the document and window controller. Replaced
+         by per-wait `OneShotWait` latches (`OneShotWait.swift`, 8 tests);
+      3. the render wait's result was discarded and shared the bridge
+         wait's leftover budget, so a blank export could be reported as
+         "Exported" — a blank 5-page A4 file is ~5 KB, well clear of the
+         2 KB blank-output guard. Each phase now has its own budget and
+         the export fails when nothing rendered;
+      4. exports are serialized. Two at once produced two blank files, one
+         `didRun:` callback and then a crash in
+         `-[NSConcretePrintOperation _finishModalOperation]`;
+      5. the document window is brought forward before printing — WebKit
+         will not draw for a window the window server considers hidden,
+         and the export wrote a blank file and called it success.
+      The print-host parking was re-tested rather than assumed: with it
+      stubbed out, 3/3 cold Source-only exports produced 5-page A4 PDFs
+      with zero text (5 373 bytes vs 64 319), with the DOM snapshot
+      confirming the content was present at print time. It stays.
+
+- [ ] **Known limitation: very large documents can export blank on the
+      first, cold export.** A 5 MB document exported from a never-shown
+      preview produced 2 609 correctly-paginated pages with no text
+      (1 134 184 bytes — past the 2 KB guard); a second export moments
+      later was correct. The `rendered` message means "`Writ.update()`
+      returned", not "WebKit finished laying out the DOM", and the 0.4 s
+      settle delay is not enough at that size. Needs a real
+      layout-quiesced signal (double `requestAnimationFrame` +
+      `document.fonts.ready`, or a size probe on `#writ-content`) rather
+      than a longer guess. Normal-sized documents are unaffected.
+
 ## 0.5.5 — window sizing
 
 - [x] **Window ratchets wider on layout switch** (reported 2026-08-21) —
