@@ -97,8 +97,9 @@ final class PrintCompletionHandlerTests: XCTestCase {
         )
     }
 
-    /// `complete(success:)` only reports success for a file that exists and
-    /// has a non-zero size, so the fixture has to be a real, non-empty file.
+    /// The handler forwards AppKit's verdict unchanged — whether the output
+    /// is usable is decided once, downstream — but the fixture is still a
+    /// real, non-empty file so the test exercises a plausible target.
     private func makeNonEmptyFile() throws -> URL {
         let url = temporaryDirectory.appendingPathComponent("export-\(UUID().uuidString).pdf")
         try Data("%PDF-1.4 stand-in for an exported document".utf8).write(to: url)

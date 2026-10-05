@@ -31,11 +31,12 @@ final class PrintCompletionHandler: NSObject {
 
     /// Selector-free core of the callback, so the completion plumbing is
     /// testable without driving a real `NSPrintOperation`.
+    ///
+    /// Forwards AppKit's verdict as-is. Whether the file on disk is usable
+    /// is decided in one place, by the view controller's `finishExport`;
+    /// this type's whole job is getting the callback onto the main thread.
     func complete(success: Bool) {
-        let exists = FileManager.default.fileExists(atPath: target.path)
-        let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
-        previewLog.notice("[pdf] printOperationDidRun: success=\(success), exists=\(exists), size=\(size)")
-        let ok = success && exists && size > 0
+        previewLog.notice("[pdf] printOperationDidRun: success=\(success)")
         // AppKit runs WKWebView's NSPrintOperation on a spawned secondary
         // thread, so this callback arrives off-main. Everything downstream —
         // the JS teardown calls and the createPDF fallback — is main-thread-only
@@ -50,7 +51,7 @@ final class PrintCompletionHandler: NSObject {
         // here, once.
         nonisolated(unsafe) let completion = self.completion
         DispatchQueue.main.async { [target] in
-            completion(target, ok)
+            completion(target, success)
         }
     }
 }

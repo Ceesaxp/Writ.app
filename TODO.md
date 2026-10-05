@@ -373,6 +373,101 @@ The headline minor-version bump. Closes the last two issues on the
       lands on block starts; fractional-position interpolation is a
       possible follow-up polish.
 
+## 0.5.6 — PDF export crash fixes
+
+- [x] **PDF export killed the app from a background thread** (reported
+      2026-10-01, crashed on macOS 27) — `EXC_BREAKPOINT` with top frame
+      `WebKit::crashDueToApplicationCallingMainThreadOnlyWebKitAPIFromBackgroundThread`.
+      AppKit runs WKWebView's `NSPrintOperation` on a thread it spawns
+      itself (`-[NSConcretePrintOperation _continueModalOperationToTheEnd:]`
+      under `__NSThread__start__`), so the `runModal` `didRun:` selector
+      arrives off-main. `PrintCompletionHandler` forwarded it through in
+      place, putting the whole teardown chain on that thread:
+      `printDidComplete`, the `onExportFinished` closure, the three JS
+      teardown calls and the `createPDF` fallback — all main-thread-only
+      WebKit API, which WebKit answers by killing the process.
+      Fix: hop to main once, unconditionally, in
+      `PrintCompletionHandler.complete(success:)`. One boundary covers
+      every downstream call. Latent since 0.4.8; the default PDF font
+      scale of 85% put `removePDFExportFontScale` on the teardown path,
+      so it fired on *every* export at default settings.
+      The compiler could not catch it: a non-`Sendable` closure stored as
+      a plain function value loses the main-actor isolation it was formed
+      with, so Swift 6 mode sees nothing. Covered by
+      `App/Tests/PrintCompletionHandlerTests.swift` in the new hostless
+      `WritTests` bundle — the project's first app-level tests.
+
+- [x] **PDF export trapped when the preview had never been shown**
+      (reported 2026-10-05) — "Unexpectedly found nil while implicitly
+      unwrapping an Optional value" in the export DOM injections.
+      Source-only layout collapses the preview's `NSSplitViewItem`, and
+      AppKit never asks a collapsed item for its view, so `loadView()`
+      never ran, `webView` (a `WKWebView!`) stayed nil and the shell was
+      never loaded. Every PDF export from Source-only layout trapped,
+      whatever the export settings — only *which* helper went first
+      varied.
+      Fix, in three parts:
+      1. `evaluateExportJS` — one helper all six injections route
+         through, guarding the webview and still calling its completion
+         so the export's completion chain cannot hang;
+      2. `prepareForExport` — forces the view to load, issues the shell
+         load, then waits for the JS bridge and the first render against
+         a shared deadline. `WritDocument` re-queues the source first,
+         but only when the preview is cold: a late `Writ.update()` would
+         replace `#writ-content` and wipe the injected TOC/header;
+      3. a temporary print host. A collapsed split item never adds its
+         view to the window *at all*, so the webview had no superview and
+         no window, and WebKit printed correctly-paginated but entirely
+         blank pages (5 373 bytes). An off-screen `NSWindow` does not
+         work — the window server reports it occluded, WebKit stops
+         treating the page as visible, still blank. What works is parking
+         the webview as the rear-most subview of the document window for
+         the duration of the print, where the opaque split view hides it.
+      Verified end to end: Source-only and Split exports now produce
+      byte-identical 5-page A4 PDFs with real text, and a screenshot
+      burst across the export shows no visible window change.
+
+- [x] **Hardening from the adversarial review of the above** — the
+      Source-only fix introduced a multi-second wait between accepting the
+      save panel and printing, which made several latent paths reachable:
+      1. the modal host window came from `NSApplication.shared.mainWindow`,
+         nil while the app is inactive, and the nil branch called
+         `op.run()` — a permanent main-thread deadlock. The document
+         window is now threaded down as a non-optional and that branch is
+         deleted. With two documents open `mainWindow` could also resolve
+         to the *other* document's window;
+      2. one shared wait token meant a second export retired the first's
+         completion without calling it — no file, no failure report, and a
+         chained `onReady` closure left installed forever, closing a
+         retain cycle through the document and window controller. Replaced
+         by per-wait `OneShotWait` latches (`OneShotWait.swift`, 8 tests);
+      3. the render wait's result was discarded and shared the bridge
+         wait's leftover budget, so a blank export could be reported as
+         "Exported" — a blank 5-page A4 file is ~5 KB, well clear of the
+         2 KB blank-output guard. Each phase now has its own budget and
+         the export fails when nothing rendered;
+      4. exports are serialized. Two at once produced two blank files, one
+         `didRun:` callback and then a crash in
+         `-[NSConcretePrintOperation _finishModalOperation]`;
+      5. the document window is brought forward before printing — WebKit
+         will not draw for a window the window server considers hidden,
+         and the export wrote a blank file and called it success.
+      The print-host parking was re-tested rather than assumed: with it
+      stubbed out, 3/3 cold Source-only exports produced 5-page A4 PDFs
+      with zero text (5 373 bytes vs 64 319), with the DOM snapshot
+      confirming the content was present at print time. It stays.
+
+- [ ] **Known limitation: very large documents can export blank on the
+      first, cold export.** A 5 MB document exported from a never-shown
+      preview produced 2 609 correctly-paginated pages with no text
+      (1 134 184 bytes — past the 2 KB guard); a second export moments
+      later was correct. The `rendered` message means "`Writ.update()`
+      returned", not "WebKit finished laying out the DOM", and the 0.4 s
+      settle delay is not enough at that size. Needs a real
+      layout-quiesced signal (double `requestAnimationFrame` +
+      `document.fonts.ready`, or a size probe on `#writ-content`) rather
+      than a longer guess. Normal-sized documents are unaffected.
+
 ## 0.5.5 — window sizing
 
 - [x] **Window ratchets wider on layout switch** (reported 2026-08-21) —
