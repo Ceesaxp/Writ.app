@@ -241,6 +241,10 @@ final class WritDocument: NSDocument {
         }
     }
 
+    /// True between accepting the save panel and the export reporting back,
+    /// so a second ⌘⇧P can be refused rather than run concurrently.
+    private var isExportingPDF = false
+
     @IBAction func exportPDF(_ sender: Any?) {
         guard let window = windowControllers.first?.window,
               let controller = windowControllers.first as? DocumentWindowController else { return }
@@ -250,8 +254,28 @@ final class WritDocument: NSDocument {
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
             guard response == .OK, let url = panel.url else { return }
+            // One export at a time. Everything downstream is single-slot —
+            // one WKWebView, one `activePrintCompletion`, one
+            // `onExportFinished` — and two `NSPrintOperation`s running
+            // against the same web view at once produce two blank files and
+            // only one `didRun:` callback. The save sheet dismisses before
+            // the export finishes, so ⌘⇧P-Return twice gets here twice;
+            // tell the user instead of corrupting both files.
+            guard !self.isExportingPDF else {
+                docLog.notice("[pdf] refusing \(url.lastPathComponent, privacy: .public): an export is already running")
+                controller.statusBar.setExportStatus("PDF export already running")
+                // `controller` is already a strong capture of this scope;
+                // holding it for the four seconds the message is up changes
+                // nothing about its lifetime.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    controller.statusBar.setExportStatus(nil)
+                }
+                return
+            }
+            self.isExportingPDF = true
             controller.statusBar.setExportStatus("Exporting PDF…")
-            controller.preview.onExportFinished = { [weak controller] finishedURL, ok in
+            controller.preview.onExportFinished = { [weak self, weak controller] finishedURL, ok in
+                self?.isExportingPDF = false
                 guard let controller else { return }
                 if ok {
                     controller.statusBar.setExportStatus("Exported \(finishedURL.lastPathComponent)")
@@ -264,15 +288,19 @@ final class WritDocument: NSDocument {
             }
             // The preview pane may never have been shown — Source-only
             // layout collapses its split item, so the WKWebView was never
-            // created and nothing was ever pushed into it. Re-queue the
-            // current source *before* bringing the preview up: `apply`
-            // stashes it as `pendingPayload` and the ready handshake
-            // flushes it, so the document is on screen before the
-            // export-only blocks are injected. Deliberately skipped when
-            // the preview is already live — a fresh `Writ.update()`
-            // landing mid-export replaces `#writ-content` and would wipe
-            // the injected TOC / header.
-            if !controller.preview.isReady {
+            // created and nothing was ever pushed into it. The ready
+            // handshake flushes whatever payload is queued, so the document
+            // is on screen before the export-only blocks are injected.
+            //
+            // Opening a document queues one, so normally there is nothing
+            // to do here. A brand-new untouched document is the exception:
+            // nothing has edited it, so the render bridge was never asked
+            // for anything and there is no payload to flush. Only then ask
+            // for one — queueing a second payload for the same handshake
+            // races the first: `onRendered` settles on whichever lands
+            // first and the other arrives during injection or printing,
+            // replacing `#writ-content` and wiping the injected TOC/header.
+            if !controller.preview.isReady, !controller.preview.hasPendingPayload {
                 self.bridge.forceRefresh(source: self.sourceText)
             }
             // `self` and `controller` are already unwrapped, strong locals in
@@ -298,7 +326,11 @@ final class WritDocument: NSDocument {
                 let frontMatter = self.bridge.currentParsedDocument?.frontMatter
                 controller.preview.pendingExportDocHeader =
                     DocumentHeaderBuilder.render(frontMatter: frontMatter)?.html
-                controller.preview.exportPDF(to: url)
+                // The document window, not whatever `NSApplication` thinks
+                // is frontmost at print time: the wait above can span a
+                // Cmd-Tab, and `mainWindow` is nil while the app is
+                // inactive (and the wrong window with two documents open).
+                controller.preview.exportPDF(to: url, in: window)
             }
         }
     }
