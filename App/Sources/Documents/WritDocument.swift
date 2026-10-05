@@ -262,20 +262,44 @@ final class WritDocument: NSDocument {
                     controller?.statusBar.setExportStatus(nil)
                 }
             }
-            // Optional TOC — `PreviewViewController.exportPDF` injects
-            // the block into the live preview, runs the print, then
-            // removes it again on completion.
-            controller.preview.pendingExportTOC = ExportService.includeTOC
-                ? TOCBuilder.render(from: self.sourceText)
-                : nil
-            // Front-matter document header (closes #22) — only injected
-            // when the FM carries at least one of title / author / date /
-            // description. Without that, the live preview keeps its
-            // dimmed FM card in the PDF too.
-            let frontMatter = self.bridge.currentParsedDocument?.frontMatter
-            controller.preview.pendingExportDocHeader =
-                DocumentHeaderBuilder.render(frontMatter: frontMatter)?.html
-            controller.preview.exportPDF(to: url)
+            // The preview pane may never have been shown — Source-only
+            // layout collapses its split item, so the WKWebView was never
+            // created and nothing was ever pushed into it. Re-queue the
+            // current source *before* bringing the preview up: `apply`
+            // stashes it as `pendingPayload` and the ready handshake
+            // flushes it, so the document is on screen before the
+            // export-only blocks are injected. Deliberately skipped when
+            // the preview is already live — a fresh `Writ.update()`
+            // landing mid-export replaces `#writ-content` and would wipe
+            // the injected TOC / header.
+            if !controller.preview.isReady {
+                self.bridge.forceRefresh(source: self.sourceText)
+            }
+            // `self` and `controller` are already unwrapped, strong locals in
+            // this scope; re-capturing them weakly here would contradict that
+            // and the wait is bounded by `prepareForExport`'s timeout anyway.
+            controller.preview.prepareForExport { ready in
+                guard ready else {
+                    // Reuse the handler installed above so the failure
+                    // message and its timed clear stay in one place.
+                    controller.preview.onExportFinished?(url, false)
+                    return
+                }
+                // Optional TOC — `PreviewViewController.exportPDF` injects
+                // the block into the live preview, runs the print, then
+                // removes it again on completion.
+                controller.preview.pendingExportTOC = ExportService.includeTOC
+                    ? TOCBuilder.render(from: self.sourceText)
+                    : nil
+                // Front-matter document header (closes #22) — only injected
+                // when the FM carries at least one of title / author / date /
+                // description. Without that, the live preview keeps its
+                // dimmed FM card in the PDF too.
+                let frontMatter = self.bridge.currentParsedDocument?.frontMatter
+                controller.preview.pendingExportDocHeader =
+                    DocumentHeaderBuilder.render(frontMatter: frontMatter)?.html
+                controller.preview.exportPDF(to: url)
+            }
         }
     }
 }

@@ -396,6 +396,91 @@ final class PreviewViewController: NSViewController {
     /// of the print. Both are torn down on completion.
     var pendingExportDocHeader: String?
 
+    /// Monotonic token for the in-flight one-shot export wait. Bumping it
+    /// retires whichever of (hook, deadline backstop) lost the race, so a
+    /// wait reports exactly once.
+    private var exportWaitToken = 0
+
+    /// Brings the preview up on demand so an export can run even when the
+    /// preview pane has never been shown.
+    ///
+    /// In Source-only layout `DocumentWindowController` collapses the
+    /// preview's `NSSplitViewItem`, and AppKit never asks a collapsed item
+    /// for its view — so `loadView()` never runs, `webView` stays nil and
+    /// the shell is never loaded. Nothing else on the export path does any
+    /// of that, so this does all three.
+    ///
+    /// Reports `true` once the JS bridge is up (and, best effort, has the
+    /// document on screen), `false` if the bridge does not come up within
+    /// `timeout`. Completes promptly when the preview is already running.
+    func prepareForExport(timeout: TimeInterval = 5, completion: @escaping (Bool) -> Void) {
+        // Reading `view` is what makes AppKit run `loadView()` — the only
+        // place `webView` is assigned.
+        if !isViewLoaded { _ = view }
+        // `viewWillAppear` issues the shell load, and a collapsed pane
+        // never appears.
+        if !hasIssuedLoad {
+            hasIssuedLoad = true
+            loadShell()
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        whenBridgeReady(by: deadline) { [weak self] ready in
+            guard ready, let self else {
+                previewLog.error("[pdf] preview bridge not ready within \(timeout)s — cannot export")
+                completion(false)
+                return
+            }
+            // A ready bridge doesn't mean `#writ-content` has the document
+            // in it: the queued payload is flushed as part of the very same
+            // ready handshake, and `Writ.update()` replaces `#writ-content`
+            // wholesale. Printing before that lands gives a blank page, and
+            // injecting the export-only TOC / header before it lands gets
+            // the injection wiped. This wait shares the deadline but is
+            // best effort — it never fails the export on its own.
+            self.whenContentRendered(by: deadline) { _ in completion(true) }
+        }
+    }
+
+    /// Calls back once `isReady` holds, or `false` at `deadline`.
+    private func whenBridgeReady(by deadline: Date, completion: @escaping (Bool) -> Void) {
+        if isReady { completion(true); return }
+        let previous = onReady
+        let settle = armExportWait(by: deadline) { [weak self] ok in
+            self?.onReady = previous
+            completion(ok)
+        }
+        onReady = { previous?(); settle(true) }
+    }
+
+    /// Calls back once the preview has rendered a payload, or `false` at
+    /// `deadline`.
+    private func whenContentRendered(by deadline: Date, completion: @escaping (Bool) -> Void) {
+        if lastRenderedRevision.value != 0 { completion(true); return }
+        let previous = onRendered
+        let settle = armExportWait(by: deadline) { [weak self] ok in
+            self?.onRendered = previous
+            completion(ok)
+        }
+        onRendered = { revision in previous?(revision); settle(true) }
+    }
+
+    /// Arms a one-shot wait against `deadline` and hands back the closure
+    /// the hook calls when its condition is met. Whichever of the two fires
+    /// first wins; the loser is retired by the token.
+    private func armExportWait(by deadline: Date, completion: @escaping (Bool) -> Void) -> (Bool) -> Void {
+        exportWaitToken += 1
+        let token = exportWaitToken
+        let settle: (Bool) -> Void = { [weak self] ok in
+            guard let self, self.exportWaitToken == token else { return }
+            self.exportWaitToken += 1
+            completion(ok)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, deadline.timeIntervalSinceNow)) {
+            settle(false)
+        }
+        return settle
+    }
+
     func exportPDF(to url: URL, then: (() -> Void)? = nil) {
         // The user-supplied `then` runs first on completion, then any
         // pre-existing `onExportFinished`, and finally the handler is
@@ -448,8 +533,20 @@ final class PreviewViewController: NSViewController {
 
     /// Runs one of the export-only DOM injections below in the preview
     /// document. All six had the same two-line shape; this is the single
-    /// place that shape lives now.
+    /// place that shape lives now — and the single place that tolerates a
+    /// preview which was never loaded.
+    ///
+    /// `webView` is only assigned in `loadView()`, and in Source-only
+    /// layout the preview's split item is collapsed, so AppKit may never
+    /// have asked for the view. Force-unwrapping here trapped on every PDF
+    /// export from Source-only layout. `completion` is still called — the
+    /// export pipeline is a chain of completion handlers and must not hang.
     private func evaluateExportJS(_ js: String, completion: (() -> Void)? = nil) {
+        guard let webView else {
+            previewLog.error("[pdf] preview webview not loaded; skipping export injection")
+            completion?()
+            return
+        }
         webView.evaluateJavaScript(js) { _, _ in completion?() }
     }
 
@@ -551,6 +648,10 @@ final class PreviewViewController: NSViewController {
 
     private func exportPDFImpl(to url: URL) {
         let host = webView
+        // `runModal` needs a real, on-screen window to run its modal session
+        // in — resolve it before the temporary print host below can make
+        // `host.window` non-nil.
+        let modalHostWindow = host?.window ?? NSApplication.shared.mainWindow
         let target = url
         let paper = ExportService.pdfPaperSize.pointSize
         previewLog.notice("[pdf] entry target=\(target.path, privacy: .public) paper=\(ExportService.pdfPaperSize.rawValue, privacy: .public) size=\(paper.width)x\(paper.height)")
@@ -572,6 +673,16 @@ final class PreviewViewController: NSViewController {
         """) { value, _ in
             previewLog.notice("[pdf] dom snapshot: \(String(describing: value), privacy: .public)")
         }
+
+        // A collapsed `NSSplitViewItem` never has its view added to the
+        // window, so a preview brought up purely for an export has no
+        // superview and no window at all. WKWebView's print path asks the
+        // WebContent process to draw the pages, and with no host window it
+        // hands back correctly-paginated but completely empty pages. Give
+        // the view a real host for the duration of the print — done
+        // *before* the settle delay below so WebKit has that whole window
+        // to adopt it. Torn down in `teardownTemporaryPrintHost`.
+        if let host { attachTemporaryPrintHostIfNeeded(for: host, paper: paper, in: modalHostWindow) }
 
         // After settle delay, run the paginated print path. If it
         // produces an unusable file (missing or tiny), we fall back
@@ -640,13 +751,14 @@ final class PreviewViewController: NSViewController {
             }
             self?.activePrintCompletion = completion
 
-            guard let window = host.window ?? NSApplication.shared.mainWindow else {
+            guard let window = modalHostWindow else {
                 previewLog.error("[pdf] no host window for runModal — falling back to run()")
                 let started = op.run()
                 heartbeat.cancel()
                 let exists = FileManager.default.fileExists(atPath: target.path)
                 let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
                 previewLog.notice("[pdf] fallback op.run() returned \(started), exists=\(exists), size=\(size)")
+                self?.teardownTemporaryPrintHost()
                 self?.onExportFinished?(target, exists && size > 0)
                 self?.activePrintCompletion = nil
                 return
@@ -684,13 +796,47 @@ final class PreviewViewController: NSViewController {
         if suspect {
             previewLog.notice("[pdf] suspicious output (size=\(size)); falling back to createPDF")
             fallbackCreatePDF(to: url) { [weak self] ok in
+                self?.teardownTemporaryPrintHost()
                 self?.onExportFinished?(url, ok)
                 self?.activePrintCompletion = nil
             }
             return
         }
+        teardownTemporaryPrintHost()
         onExportFinished?(url, exists && size > 0)
         activePrintCompletion = nil
+    }
+
+    /// True while the preview's WKWebView is parked in the document
+    /// window purely so a print operation has a host for it.
+    private var isUsingTemporaryPrintHost = false
+
+    /// The view we parked the WKWebView in, so teardown only detaches it
+    /// if nothing else (a layout switch mid-export) adopted it meanwhile.
+    private weak var temporaryPrintHostSuperview: NSView?
+
+    private func attachTemporaryPrintHostIfNeeded(for host: WKWebView, paper: NSSize, in window: NSWindow?) {
+        guard host.window == nil, let content = window?.contentView else { return }
+        host.frame = NSRect(origin: .zero, size: paper)
+        // Behind every existing subview, so the opaque split view covers it
+        // and the pane still looks collapsed. A dedicated off-screen
+        // NSWindow was tried first and did not work: the window server
+        // reports it as occluded, WebKit stops treating the page as
+        // visible, and the print comes back paginated but blank.
+        content.addSubview(host, positioned: .below, relativeTo: nil)
+        temporaryPrintHostSuperview = content
+        isUsingTemporaryPrintHost = true
+        previewLog.notice("[pdf] parked webview behind the document window content at \(paper.width)x\(paper.height)")
+    }
+
+    private func teardownTemporaryPrintHost() {
+        guard isUsingTemporaryPrintHost else { return }
+        isUsingTemporaryPrintHost = false
+        if let webView, webView.superview === temporaryPrintHostSuperview {
+            webView.removeFromSuperview()
+        }
+        temporaryPrintHostSuperview = nil
+        previewLog.notice("[pdf] released temporary print host")
     }
 
     /// Fallback: render the WebView contents to a single-page PDF via
