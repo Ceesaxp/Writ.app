@@ -74,7 +74,66 @@ default.
 count, matching `NSTextView` selection semantics. Mixing `Character` indices
 with UTF-16 offsets has already cost this project one crash.
 
-## 4. Layers
+## 4. What AppKit will and will not do
+
+Measured on a real TextKit 1 `NSTextView` (macOS 27.0, build 26A428) rather
+than assumed. The spike source and raw output are not kept in the repo; the
+conclusions are:
+
+**Multiple *empty* selection ranges are impossible.** `selectedRanges =
+[{0,0}, {10,0}, {13,0}]` comes back as a single range. It is not a bug —
+`NSTextView.h` says so, above `-setSelectedRanges:affinity:stillSelecting:`:
+
+> The return value of selectedRanges obeys the same restrictions, and in
+> addition its elements are sorted, non-overlapping, non-contiguous, and
+> (except for the case of a single range) have non-zero-length.
+
+**Mixed sets silently drop their empty members.** `[{0,5}, {10,0}, {13,5}]`
+returns two ranges. That is exactly the ragged-line case: a block overhanging
+a short line produces a zero-length fragment for that row, and AppKit throws
+it away.
+
+Consequence: **the block state cannot live in `selectedRanges`.** Writ owns
+it, and `selectedRanges` is used only as a rendering channel for the rows
+that *are* non-empty — those AppKit preserves verbatim and highlights for
+free, which is worth having. Zero-length rows get a caret Writ draws itself.
+
+**Multiple non-empty ranges are preserved**, sorted, and `selectedRange()`
+returns the first — so the status bar keeps working unchanged.
+
+**Typing does not fan out.** `insertText(_:replacementRange:)` with three
+ranges selected edits only the first and collapses the selection. Every
+block edit must therefore be applied by Writ.
+
+**But the multi-range edit API does fan out, and it accepts empty ranges.**
+`shouldChangeText(inRanges:replacementStrings:)` returns true for all-empty
+and mixed range sets — the sets that cannot be *selected* — and a single
+`undo()` restores the whole document. So N-caret editing is fully supported
+even though N-caret *selection* is not. This is the hinge the design turns
+on: own the state, edit through the multi-range API, one undo group per
+gesture.
+
+**Copy is already `\n`-joined**, and AppKit puts a
+`com.apple.cocoa.pasteboard.multiple-text-selection` flavour alongside the
+text — a plist of *line counts per fragment* (verified: `[2, 1]` for a
+two-line and a one-line fragment, not their character lengths). Writ still
+builds the copy string from the model, because AppKit's version omits the
+dropped empty rows and so loses the rectangle's shape.
+
+**Hit-testing: use `textView.characterIndexForInsertion(at:)`.** It clamps a
+point far past end-of-line to that line's own end and never bleeds onto the
+next line. The lower-level
+`characterIndex(for:in:fractionOfDistanceBetweenInsertionPoints:)` returns
+the line's end index with `fraction == 1.0`, so the usual
+`fraction >= 0.5 ? index + 1 : index` rounding *does* bleed to the next
+line's column 0. Below the last line, `characterIndexForInsertion` correctly
+returns the phantom trailing position.
+
+**Undo does not restore the selection shape.** No edit path restores the
+multi-range selection on undo; the block collapses. Restoring it would mean
+registering that separately, which this version does not do.
+
+## 5. Layers
 
 `App/Sources/Editor/BlockSelection.swift` — pure value types, Foundation
 only, no AppKit. `LineIndex` (UTF-16 line-start table), `BlockPosition`,
@@ -86,13 +145,13 @@ it can be unit-tested in the hostless `WritTests` bundle:
 - `copyString(from:index:)` — `\n`-joined fragments.
 - `replacementEdits(with:in:)` — replace every fragment; sorted **descending**
   by location so applying them in order keeps later offsets valid.
-- `pasteEdits(clipboard:in:)` — distribution rules in §5.
+- `pasteEdits(clipboard:in:)` — distribution rules in §6.
 
 `App/Sources/Editor/WritTextView.swift` — the AppKit plumbing: ⌥-drag
 tracking, the overridden move selectors, and the edit interception. Thin by
 design; it owns the block state and delegates every decision to the model.
 
-## 5. Paste distribution
+## 6. Paste distribution
 
 Clipboard split on `\n`, discarding exactly one trailing newline. M clipboard
 lines into N block rows:
@@ -106,7 +165,7 @@ lines into N block rows:
 The third rule is lossless and predictable. Distributing a mismatched
 clipboard means silently dropping or duplicating the user's lines.
 
-## 6. Known limitations
+## 7. Known limitations
 
 - A block through a soft-wrapped line covers its first visual row only (§3).
 - Tabs and wide glyphs make the rectangle geometrically ragged (§3).
