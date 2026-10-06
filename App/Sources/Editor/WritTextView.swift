@@ -387,6 +387,155 @@ final class WritTextView: NSTextView {
         }
     }
 
+    // MARK: - Block selection: hit-testing
+
+    /// The rectangle corner a point in **view** coordinates lands on.
+    ///
+    /// `characterIndexForInsertion(at:)` is the accessor, and the choice is
+    /// load-bearing rather than a matter of taste. It takes view coordinates
+    /// and applies `textContainerOrigin` itself, so there is no conversion to
+    /// get wrong, and — the part that matters — it **clamps a point past
+    /// end-of-line to that line's own end**.
+    ///
+    /// The lower-level
+    /// `characterIndex(for:in:fractionOfDistanceBetweenInsertionPoints:)` does
+    /// not. Measured on this stack with `"alpha\nbb\ngamma"` and a point at
+    /// x = 5000 on **line 0**: it answers `idx = 5, fraction = 1.0`, so the
+    /// conventional `fraction >= 0.5 ? idx + 1 : idx` rounding gives **6** —
+    /// line 1, column 0 — where `characterIndexForInsertion` gives **5**, the
+    /// end of line 0 where the user pointed. A drag to the right of a line
+    /// would silently take the rectangle onto the line below (§4). Below the
+    /// last line `characterIndexForInsertion` also returns the document's
+    /// trailing position (measured: `14`) rather than refusing the point.
+    ///
+    /// So this is not a convenience wrapper that could be "optimised" to the
+    /// layout manager: the two calls disagree by one line.
+    ///
+    /// A live block's `LineIndex` is reused when there is one. Building one is
+    /// an O(document) scan and the mouse path asks for a position on every
+    /// `mouseDragged` sample, which is the whole reason the table is cached
+    /// alongside the block in the first place.
+    func blockPosition(for pointInView: NSPoint) -> BlockPosition {
+        let index = blockLineIndex ?? LineIndex(string)
+        return index.position(forUTF16Offset: characterIndexForInsertion(at: pointInView))
+    }
+
+    // MARK: - Block selection: key routing
+
+    /// `insertText:`, as a plain selector.
+    ///
+    /// `#selector(NSText.insertText(_:))` would name the same method but the
+    /// single-argument form is deprecated, and referring to it costs a
+    /// deprecation warning for no gain — `doCommand(by:)` is handed a
+    /// `Selector`, never the method. The double parentheses tell Swift the
+    /// string literal is deliberate rather than a `#selector` someone forgot.
+    private static let insertTextCommand = Selector(("insertText:"))
+
+    /// Every key binding that touches the block, routed in one place (§2).
+    ///
+    /// **One override, not five.** The point of a single `switch` is its
+    /// `default:` case: anything not named below **drops the block** before
+    /// `super` sees it. The block holds line/column coordinates, so a command
+    /// that moves the selection or rewrites the text without the view knowing
+    /// leaves `blockSelection` and `selectedRanges` describing different
+    /// things — and the next block edit is then applied at offsets taken from
+    /// the wrong document (§5). Five separate method overrides would each
+    /// handle their own selector and silently let every other one through.
+    /// Dropping is the safe side of that bet: the cost is a rectangle the user
+    /// has to redraw, against an edit written into the wrong place.
+    ///
+    /// **The fall-through list is not redundant with `default:` — inverting it
+    /// breaks tested behaviour.** `insertTab:`, `deleteBackward:`,
+    /// `deleteForward:`, `insertText:` and `insertNewline:` must reach `super`
+    /// with the block *still live*, because `insertText(_:replacementRange:)`,
+    /// `deleteBackward(_:)` and `deleteForward(_:)` above already implement
+    /// §2's rules for them: Tab fans out across the rows, the deletes take one
+    /// grapheme per row without crossing a line boundary, and a newline drops
+    /// the block itself before inserting exactly one. Dropping here first
+    /// would indent one row instead of all of them and turn a block backspace
+    /// into an ordinary one — `WritTextViewBlockSelectionTests` pins both.
+    ///
+    /// `⌥⇧←/→` is the hybrid case: `moveWordLeft/RightAndModifySelection:` is
+    /// stock word-extend, a binding worth keeping, so it is only claimed while
+    /// a block is live and otherwise falls through to `super`.
+    override func doCommand(by selector: Selector) {
+        switch selector {
+        case #selector(NSResponder.moveParagraphBackwardAndModifySelection(_:)):
+            extendBlock(byLines: -1)
+        case #selector(NSResponder.moveParagraphForwardAndModifySelection(_:)):
+            extendBlock(byLines: 1)
+        case #selector(NSResponder.moveWordLeftAndModifySelection(_:)):
+            if !extendBlock(byColumns: -1) { super.doCommand(by: selector) }
+        case #selector(NSResponder.moveWordRightAndModifySelection(_:)):
+            if !extendBlock(byColumns: 1) { super.doCommand(by: selector) }
+        case #selector(NSResponder.cancelOperation(_:)):
+            if blockSelection == nil {
+                super.doCommand(by: selector)
+            } else {
+                dropBlockSelection()
+            }
+        case #selector(NSResponder.insertNewline(_:)),
+             #selector(NSResponder.insertTab(_:)),
+             #selector(NSResponder.deleteBackward(_:)),
+             #selector(NSResponder.deleteForward(_:)),
+             WritTextView.insertTextCommand:
+            super.doCommand(by: selector)
+        default:
+            dropBlockSelection()
+            super.doCommand(by: selector)
+        }
+    }
+
+    /// ⌥⇧↑/↓: start a block when none is live, then move the head `lines`
+    /// rows. The head's line clamps into the document — growing past the first
+    /// or last line stops there rather than wrapping round or running off the
+    /// line table.
+    ///
+    /// The column is carried over untouched, so a rectangle keeps its width as
+    /// it grows and a column of carets stays zero-width.
+    private func extendBlock(byLines lines: Int) {
+        if blockSelection == nil { beginBlockSelectionFromSelection() }
+        guard let block = blockSelection, let index = blockLineIndex else { return }
+        let line = max(0, min(block.head.line + lines, index.lineCount - 1))
+        updateBlockSelection(head: BlockPosition(line: line, column: block.head.column))
+    }
+
+    /// ⌥⇧←/→ **while a block is live**: move the head `columns` columns.
+    /// Returns false when there is no block, which is the caller's signal to
+    /// leave the keystroke to AppKit's word-extend.
+    ///
+    /// Column 0 is the floor. There is deliberately no ceiling: a column past
+    /// a short row's end is the overhang case the model is built for — every
+    /// row's fragment clamps to its own line and typing appends at the short
+    /// row's end rather than padding with spaces (§3).
+    private func extendBlock(byColumns columns: Int) -> Bool {
+        guard let block = blockSelection else { return false }
+        updateBlockSelection(
+            head: BlockPosition(
+                line: block.head.line, column: max(0, block.head.column + columns)
+            )
+        )
+        return true
+    }
+
+    /// Turn the current selection into a block: the anchor corner at its
+    /// start, the head corner at its end.
+    ///
+    /// A caret gives a zero-width block, which is the common case —
+    /// ⌥⇧↓ from a caret and typing is the feature's motivating gesture. A
+    /// single-line selection gives the block its column span, so selecting
+    /// `|` on one line and pulling the rectangle down turns into a column of
+    /// pipes. A selection spanning several lines contributes both its rows and
+    /// its columns, which is the same rule read without a special case.
+    private func beginBlockSelectionFromSelection() {
+        let index = LineIndex(string)
+        let selection = selectedRange()
+        beginBlockSelection(
+            anchor: index.position(forUTF16Offset: selection.location),
+            head: index.position(forUTF16Offset: NSMaxRange(selection))
+        )
+    }
+
     // MARK: - Block selection: the two choke points
 
     /// Selection changed. A plain click, ⌘F, the Insert menu's helpers and any
