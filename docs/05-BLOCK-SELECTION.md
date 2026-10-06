@@ -41,7 +41,22 @@ gesture is **hybrid**:
 
 `⌥⇧↑/↓` natively means `moveParagraphBackward/ForwardAndModifySelection:`,
 which a line-oriented editor barely uses — that is the binding we spend.
-Any unmodified caret move, or any click without ⌥, also drops the block.
+
+While a block is live:
+
+| Input | Behaviour |
+|---|---|
+| any printable text | replaces every row's fragment; a zero-width block inserts at N carets |
+| `Tab` | a block insert like any other character — column indent is useful |
+| `Return`, or any insert containing `\n` | **drops the block** to a single caret, then inserts normally |
+| `Backspace` / `Fwd Delete` | one grapheme per row, never crossing a line boundary (§6) |
+| dead keys / marked text | drops the block, then composes normally |
+| anything else | drops the block, then does its stock thing |
+
+Fanning `Return` out across the rows would insert N newlines and dissolve
+the very rows the rectangle is defined over, so it drops instead. Dead-key
+composition goes through `setMarkedText`, which only ever marks the first of
+several ranges, so it drops too.
 
 ## 3. Model: logical lines, character columns
 
@@ -155,6 +170,30 @@ it can be unit-tested in the hostless `WritTests` bundle:
 tracking, the overridden move selectors, and the edit interception. Thin by
 design; it owns the block state and delegates every decision to the model.
 
+### When the block must be dropped
+
+The block holds line/column coordinates, so any change it did not make
+invalidates it. Applying stale coordinates to a changed document would write
+edits into the wrong place — so rather than enumerate the paths that can
+invalidate it, the view drops the block at two choke points and defaults to
+dropping everywhere else:
+
+- **Text changed underneath it** — `NSTextStorage.didProcessEditingNotification`,
+  which the view already observes for the front-matter cache. Undo, Find &
+  Replace, `setSource`, the syntax highlighter and anything else all arrive
+  here. Guarded by a flag so the block's *own* edits do not drop it.
+- **Selection changed from outside** — the `setSelectedRange(s)` overrides,
+  guarded by the same kind of flag so the view's own display refresh does not
+  drop it. A plain click, ⌘F and any programmatic selection all pass through.
+
+`doCommand(by:)` handles the block selectors explicitly and **drops the block
+in its default case**, so an unhandled command can never leave the block and
+`selectedRanges` disagreeing.
+
+A `LineIndex` is built once when the block starts and reused for every drag
+event and keypress, then discarded with the block. Rebuilding it per
+mouse-dragged event would be an O(document) scan on every mouse sample.
+
 ## 6. Paste distribution
 
 Clipboard split on `\n`, discarding exactly one trailing newline. M clipboard
@@ -176,3 +215,11 @@ clipboard means silently dropping or duplicating the user's lines.
 - No space padding past end-of-line (§3).
 - The status bar's line:column readout follows the block's first row, since
   `textViewDidChangeSelection` reads `selectedRange()`.
+- Rows AppKit refuses to highlight (the zero-length ones) get a caret Writ
+  draws itself. It does not blink in step with the real insertion point.
+- Dead-key / marked-text composition drops the block rather than composing
+  into every row.
+- After a backspace the new column is derived from the head row's grapheme,
+  so on rows whose characters have different UTF-16 widths the carets can
+  drift a unit or two apart. Cosmetic, and exact for ASCII.
+- Undo restores the text but not the rectangle (§4).
