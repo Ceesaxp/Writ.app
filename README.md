@@ -193,4 +193,5 @@ Writ is local-first:
 - [MVP implementation plan](docs/01-MVP-PLAN.md)
 - [Technical design](docs/02-TECHNICAL-DESIGN.md)
 - [M0 decisions and baseline](docs/03-M0-DECISIONS.md)
+- [Block (rectangular) selection](docs/05-BLOCK-SELECTION.md)
 - [Implementation TODO](TODO.md)
