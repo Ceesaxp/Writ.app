@@ -371,6 +371,12 @@ final class WritTextView: NSTextView {
     /// is why only the non-empty fragments are offered.
     func refreshBlockSelectionDisplay() {
         guard let block = blockSelection, let index = blockLineIndex else { return }
+        // AppKit invalidates the selection it was handed and nothing else, and
+        // the zero-length rows are exactly what it was *not* handed — so the
+        // carets `draw(_:)` paints for them would keep the positions they had
+        // before the rectangle moved. Asking for the repaint belongs here
+        // because every change to the block comes through this method.
+        needsDisplay = true
         let nonEmpty = block.fragmentRanges(in: index).filter { $0.length > 0 }
         isRefreshingBlockDisplay = true
         defer { isRefreshingBlockDisplay = false }
@@ -385,6 +391,117 @@ final class WritTextView: NSTextView {
                 nonEmpty.map { NSValue(range: $0) }, affinity: .downstream, stillSelecting: false
             )
         }
+    }
+
+    // MARK: - Block selection: the carets AppKit will not draw
+
+    /// Width of a block caret. One point, matching the ordinary insertion
+    /// point so the drawn rows and the real one read as the same thing.
+    private static let blockCaretWidth: CGFloat = 1
+
+    /// Paint a caret on every zero-length row of the block.
+    ///
+    /// `super` draws the text and highlights the fragments that reached
+    /// `selectedRanges` — which is all the *non-empty* ones and no more. A
+    /// zero-width block arrives there as one caret at the head corner, and a
+    /// ragged block has its short rows silently discarded (§4). Those are the
+    /// rows drawn here.
+    ///
+    /// **Every** zero-length row, including the one AppKit is already showing
+    /// a caret on: drawing all N identically is the point. Skipping the one
+    /// AppKit has would leave a single row blinking against N-1 solid ones,
+    /// which reads as a rendering fault rather than as one rectangle. These
+    /// carets do not blink and there is no timer to make them — a repaint
+    /// timer on a text view that already redraws on every keystroke is a cost
+    /// for a cosmetic gain (§7).
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let block = blockSelection, let index = blockLineIndex else { return }
+        let rows = block.fragmentRanges(in: index).filter { $0.length == 0 }
+        guard !rows.isEmpty else { return }
+
+        insertionPointColor.setFill()
+        for row in rows {
+            guard let caret = blockCaretRect(atUTF16Offset: row.location),
+                  caret.intersects(dirtyRect) else { continue }
+            caret.fill()
+        }
+    }
+
+    /// The rect a caret at a UTF-16 `offset` occupies, in **view**
+    /// coordinates, or nil when the offset has no geometry to stand on.
+    ///
+    /// Not private and not inlined into `draw(_:)`: a drawing override cannot
+    /// be asserted on in the hostless test bundle, and the three branches
+    /// below are the whole of what could be wrong here. Measured on the
+    /// harness (TK1, 13pt monospace) rather than assumed:
+    ///
+    /// - **Inside the text.** `location(forGlyphAt:)` already includes the
+    ///   container's 5pt `lineFragmentPadding` — glyph 0 of `"alpha…"` reports
+    ///   `x == 5.0` — so x is the fragment's `minX` plus the glyph's own x and
+    ///   **nothing else**. Adding the padding here as well would push every
+    ///   caret 5pt to the right of the text it belongs to. The newline ending
+    ///   a line has a glyph of its own (glyph 5: `x == 45.18`, fragment
+    ///   `(0, 0, 600, 16)`), which is what puts an end-of-line caret on *its*
+    ///   line instead of at column 0 of the next.
+    /// - **The last position of a document that ends in a newline, and the
+    ///   empty document.** Neither has a glyph to ask about — `""` reports
+    ///   `numberOfGlyphs == 0` — and both live in the extra line fragment.
+    ///   **The container is the test for one, never the rect**: `"ab\n"` gives
+    ///   a non-nil `extraLineFragmentTextContainer` and
+    ///   `extraLineFragmentRect == (0, 16, 600, 16)`, while
+    ///   `"alpha\nbb\ngamma"` has a nil container and a *degenerate*
+    ///   `(0, 34, 0, 0)` rect — believe that rect and the caret is drawn
+    ///   zero-height, 2pt below the document. The extra fragment has no glyph
+    ///   to take an x from, so the padding is the one place it is added by
+    ///   hand (measured 5.0, where AppKit puts its own caret on a blank line).
+    /// - **The last position of a document that does not end in a newline.**
+    ///   No glyph of its own and no extra fragment, but the glyph immediately
+    ///   before it is on the right line, so the caret goes at that glyph's
+    ///   trailing edge (measured `45.18` — the end of `"gamma"`). Not a corner
+    ///   case worth skipping: a zero-width block parked at the end of the last
+    ///   line, and a ragged block overhanging it, both put a row here, and
+    ///   without this branch that row is the one with no caret. The glyph
+    ///   cannot be a newline — a document ending in one has a non-nil extra
+    ///   container and left through the branch above — so its bounding rect
+    ///   cannot be the next-line-spanning one a newline glyph reports
+    ///   (measured for `"ab\n"`: `(0, 0, 595, 32)`).
+    ///
+    /// `textContainerOrigin` is applied rather than assumed away. It is
+    /// `(0, 0)` in the harness, but the production view lives in a scroll view
+    /// and is free to inset its container.
+    func blockCaretRect(atUTF16Offset offset: Int) -> NSRect? {
+        guard let layoutManager = layoutManager,
+              let container = textContainer,
+              let storage = textStorage else { return nil }
+        guard offset >= 0, offset <= storage.length else { return nil }
+
+        let fragment: NSRect
+        let x: CGFloat
+        if offset < storage.length {
+            let glyph = layoutManager.glyphIndexForCharacter(at: offset)
+            fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            x = fragment.minX + layoutManager.location(forGlyphAt: glyph).x
+        } else if layoutManager.extraLineFragmentTextContainer != nil {
+            fragment = layoutManager.extraLineFragmentRect
+            x = fragment.minX + container.lineFragmentPadding
+        } else if layoutManager.numberOfGlyphs > 0 {
+            let last = layoutManager.numberOfGlyphs - 1
+            fragment = layoutManager.lineFragmentRect(forGlyphAt: last, effectiveRange: nil)
+            x = layoutManager.boundingRect(
+                forGlyphRange: NSRange(location: last, length: 1), in: container
+            ).maxX
+        } else {
+            return nil
+        }
+
+        let origin = textContainerOrigin
+        return NSRect(
+            x: x + origin.x,
+            y: fragment.minY + origin.y,
+            width: WritTextView.blockCaretWidth,
+            height: fragment.height
+        )
     }
 
     // MARK: - Block selection: hit-testing
@@ -420,6 +537,84 @@ final class WritTextView: NSTextView {
         return index.position(forUTF16Offset: characterIndexForInsertion(at: pointInView))
     }
 
+    // MARK: - Block selection: ⌥-drag
+
+    /// ⌥-drag draws a rectangle; every other click stays AppKit's.
+    ///
+    /// **An ordinary click deliberately does not drop the block here.**
+    /// `super.mouseDown` sets the selection for the click, and that arrives at
+    /// the `setSelectedRange(s)` choke point, which drops it (§5). A second
+    /// drop on this path would be a second place for the rule to live, and the
+    /// choke point is the one that has to be right — ⌘F, the Insert menu and
+    /// every programmatic selection reach it and nothing else.
+    override func mouseDown(with event: NSEvent) {
+        guard event.modifierFlags.contains(.option) else {
+            super.mouseDown(with: event)
+            return
+        }
+        trackBlockSelection(from: event)
+    }
+
+    /// Run a ⌥-drag through to its mouse-up.
+    ///
+    /// A hand-rolled `nextEvent(matching:)` loop, and not the
+    /// `NSGestureRecognizer` that is the modern default for a click or a pan:
+    /// a pan recognizer does not claim the gesture until it has seen enough
+    /// movement to tell a drag from a click, and the rectangle has to exist
+    /// from the first sample so the carets appear where the mouse went down.
+    /// There is also no view-level API to replace it with — `NSTextView` has
+    /// no rectangular selection of its own, and macOS 27's
+    /// `NSTextSelectionManager` is past this app's macOS 14 deployment target.
+    ///
+    /// `NSApplication` is asked for the events rather than the window, because
+    /// periodic events belong to no window and `NSWindow.nextEvent(matching:)`
+    /// is not the place to find out whether that matters.
+    private func trackBlockSelection(from event: NSEvent) {
+        // `super.mouseDown` is what normally focuses a text view on a click,
+        // and this path never calls it — so a ⌥-drag into an unfocused editor
+        // would otherwise build a rectangle nothing can be typed into. Taken
+        // *before* the block starts: becoming first responder sets the
+        // selection, which reaches the choke point and would drop it.
+        if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+
+        let start = blockPosition(for: convert(event.locationInWindow, from: nil))
+        beginBlockSelection(anchor: start, head: start)
+
+        // Periodic events are matched alongside the drags so that a drag held
+        // still past the view's edge keeps scrolling. `autoscroll(with:)`
+        // advances the document once per call, so a loop fed only by mouse
+        // samples stops the moment the mouse does — "drag to the bottom edge
+        // and hold" would scroll one step and stall.
+        NSEvent.startPeriodicEvents(afterDelay: 0.1, withPeriod: 0.05)
+        defer { NSEvent.stopPeriodicEvents() }
+
+        var lastDrag = event
+        while let next = NSApplication.shared.nextEvent(
+            matching: [.leftMouseDragged, .leftMouseUp, .periodic],
+            until: .distantFuture,
+            inMode: .eventTracking,
+            dequeue: true
+        ), next.type != .leftMouseUp {
+            // A periodic event carries no usable location, so the last drag's
+            // is reused: it is still where the mouse is being held.
+            if next.type == .leftMouseDragged { lastDrag = next }
+            // Scroll first, then read the position. The window point has not
+            // moved but the text under it has, and the head is meant to follow
+            // the line that just scrolled into view.
+            autoscroll(with: lastDrag)
+            let head = blockPosition(for: convert(lastDrag.locationInWindow, from: nil))
+            if head != blockSelection?.head { updateBlockSelection(head: head) }
+        }
+
+        // A ⌥-click with no drag leaves a rectangle with no extent in either
+        // dimension: nothing highlighted, one caret drawn, and every following
+        // keystroke routed through the block paths for a reason the user
+        // cannot see. Collapse it to the plain caret they clicked for.
+        if let block = blockSelection, block.anchor == block.head {
+            dropBlockSelection()
+        }
+    }
+
     // MARK: - Block selection: key routing
 
     /// `insertText:`, as a plain selector.
@@ -429,7 +624,12 @@ final class WritTextView: NSTextView {
     /// deprecation warning for no gain — `doCommand(by:)` is handed a
     /// `Selector`, never the method. The double parentheses tell Swift the
     /// string literal is deliberate rather than a `#selector` someone forgot.
-    private static let insertTextCommand = Selector(("insertText:"))
+    /// `NSSelectorFromString` rather than `#selector(insertText(_:))`: the
+    /// single-argument `insertText:` is deprecated, so `#selector` on it warns,
+    /// and `Selector(("insertText:"))` warns the other way round ("use
+    /// '#selector' instead"). This spelling is the documented way to name a
+    /// selector that has no non-deprecated Swift declaration to point at.
+    private static let insertTextCommand = NSSelectorFromString("insertText:")
 
     /// Every key binding that touches the block, routed in one place (§2).
     ///
@@ -597,6 +797,11 @@ final class WritTextView: NSTextView {
     /// where whatever caused the drop is already setting the selection (or
     /// changing the text) and a second selection change would fight it.
     private func discardBlockSelection() {
+        // The drawn carets are not in `selectedRanges`, so nothing else will
+        // dirty the rows they are on: without this they stay on screen after
+        // the rectangle they belonged to is gone. Guarded on there having been
+        // a block, since the choke points call this on every selection change.
+        if blockSelection != nil { needsDisplay = true }
         blockSelection = nil
         blockLineIndex = nil
     }

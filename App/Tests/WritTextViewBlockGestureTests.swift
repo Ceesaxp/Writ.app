@@ -367,4 +367,178 @@ final class WritTextViewBlockGestureTests: XCTestCase {
             "caret, ⌥⇧↓ twice, type — three rows prefixed is the job this feature exists for"
         )
     }
+
+    // MARK: - Caret geometry for the rows AppKit will not draw
+
+    /// The line fragment rect `line` starts in, read off the layout manager so
+    /// the assertions below are about `blockCaretRect`'s arithmetic and not
+    /// about the fixture font's metrics. **Which** fragment a caret lands in is
+    /// the interesting part, so that is asserted exactly; the x coordinates are
+    /// asserted relationally except where a measured constant *is* the rule
+    /// under test (the 5pt padding).
+    @MainActor
+    private func lineFragment(_ harness: TextViewHarness, line: Int) -> NSRect {
+        let start = LineIndex(harness.textView.string).lineStart(line)
+        let glyph = harness.layoutManager.glyphIndexForCharacter(at: start)
+        return harness.layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+    }
+
+    @MainActor
+    func testCaretRectAtAnInteriorOffsetSitsAtItsLinesStart() throws {
+        let harness = TextViewHarness(Self.fixture)
+        harness.assertTextKit1()
+
+        // Offset 6 — line 1, column 0.
+        let caret = try XCTUnwrap(harness.textView.blockCaretRect(atUTF16Offset: 6))
+
+        XCTAssertEqual(
+            caret.minY, lineFragment(harness, line: 1).minY,
+            "the caret takes its row from the line fragment the glyph is in"
+        )
+        XCTAssertEqual(caret.height, lineFragment(harness, line: 1).height)
+        XCTAssertEqual(
+            caret.width, 1, "one point wide, like the insertion point AppKit draws itself"
+        )
+        XCTAssertEqual(
+            caret.minX, 5, accuracy: 0.001,
+            """
+            a line-start caret sits at the container's 5pt lineFragmentPadding and \
+            no further: `location(forGlyphAt:)` already includes it, so 10 would \
+            mean the padding was added a second time
+            """
+        )
+    }
+
+    @MainActor
+    func testCaretRectAtEndOfLineStaysOnThatLine() throws {
+        let harness = TextViewHarness(Self.fixture)
+
+        // Offset 5 — the end of "alpha", where its newline begins.
+        let caret = try XCTUnwrap(harness.textView.blockCaretRect(atUTF16Offset: 5))
+        let oneLeft = try XCTUnwrap(harness.textView.blockCaretRect(atUTF16Offset: 4))
+
+        XCTAssertEqual(
+            caret.minY, lineFragment(harness, line: 0).minY,
+            """
+            an end-of-line caret belongs to line 0. Line 1's minY would mean the \
+            newline's glyph was taken to start the line it ends (§4)
+            """
+        )
+        XCTAssertGreaterThan(
+            caret.minX, oneLeft.minX, "and it is one character further right than the caret before it"
+        )
+    }
+
+    @MainActor
+    func testCaretRectOnThePhantomLineAfterATrailingNewline() throws {
+        let harness = TextViewHarness("ab\n")
+        let extra = harness.layoutManager.extraLineFragmentRect
+        XCTAssertNotNil(
+            harness.layoutManager.extraLineFragmentTextContainer,
+            "the fixture has to end in a newline for there to be a phantom row at all"
+        )
+
+        // Offset 3 is both the document's end and the phantom line's column 0.
+        let caret = try XCTUnwrap(harness.textView.blockCaretRect(atUTF16Offset: 3))
+
+        XCTAssertEqual(
+            caret.minY, extra.minY, "the phantom row's caret comes from the extra line fragment"
+        )
+        XCTAssertEqual(caret.height, extra.height)
+        XCTAssertGreaterThan(
+            caret.minY, lineFragment(harness, line: 0).minY, "and it is below the real line, not on it"
+        )
+        XCTAssertEqual(
+            caret.minX, 5, accuracy: 0.001,
+            "at the padding — there is no glyph to take an x from, so it is added here"
+        )
+    }
+
+    @MainActor
+    func testCaretRectInAnEmptyDocument() throws {
+        let harness = TextViewHarness("")
+        XCTAssertEqual(
+            harness.layoutManager.numberOfGlyphs, 0,
+            "an empty document has no glyphs, so its caret can only come from the extra fragment"
+        )
+
+        let caret = try XCTUnwrap(
+            harness.textView.blockCaretRect(atUTF16Offset: 0),
+            """
+            an empty document still has a caret position. nil here would leave the \
+            single row of a block in a brand-new document with nothing drawn
+            """
+        )
+
+        XCTAssertEqual(caret.minY, 0)
+        XCTAssertEqual(caret.minX, 5, accuracy: 0.001)
+        XCTAssertGreaterThan(
+            caret.height, 0, "with a usable height, taken from the extra fragment"
+        )
+    }
+
+    @MainActor
+    func testCaretRectAtEndOfADocumentThatDoesNotEndInANewline() throws {
+        let harness = TextViewHarness(Self.fixture)
+        XCTAssertNil(
+            harness.layoutManager.extraLineFragmentTextContainer,
+            """
+            a document not ending in a newline has no extra line fragment — which \
+            is what makes this a third case and not the one above
+            """
+        )
+
+        // Offset 14 — the end of "gamma", and so of the document.
+        let caret = try XCTUnwrap(
+            harness.textView.blockCaretRect(atUTF16Offset: 14),
+            """
+            the last position of the last line needs a caret: a zero-width block \
+            parked there, or a ragged one overhanging it, puts a row here
+            """
+        )
+        let oneLeft = try XCTUnwrap(harness.textView.blockCaretRect(atUTF16Offset: 13))
+
+        XCTAssertEqual(
+            caret.minY, lineFragment(harness, line: 2).minY,
+            """
+            on the last line — not 2pt below the document, where this stack's \
+            degenerate extraLineFragmentRect of (0, 34, 0, 0) would put it
+            """
+        )
+        XCTAssertEqual(caret.height, lineFragment(harness, line: 2).height)
+        XCTAssertGreaterThan(caret.minX, oneLeft.minX, "one character right of the caret before it")
+    }
+
+    @MainActor
+    func testCaretRectPastTheEndOfTheDocumentIsNil() {
+        let harness = TextViewHarness(Self.fixture)
+
+        XCTAssertNil(
+            harness.textView.blockCaretRect(atUTF16Offset: 15),
+            "an offset outside the document has no geometry, and a guess would be drawn somewhere"
+        )
+    }
+
+    @MainActor
+    func testAZeroWidthBlocksCaretsShareAColumnAndStepDownTheLines() throws {
+        let harness = TextViewHarness(Self.fixture)
+        carets(harness, column: 1, lines: 0...2)
+        let block = try XCTUnwrap(harness.textView.blockSelection)
+
+        let rects = try block.fragmentRanges(in: LineIndex(harness.textView.string)).map {
+            try XCTUnwrap(
+                harness.textView.blockCaretRect(atUTF16Offset: $0.location),
+                "every row of a zero-width block needs a caret — that is all the user can see of it"
+            )
+        }
+
+        XCTAssertEqual(rects.count, 3)
+        XCTAssertEqual(
+            Set(rects.map(\.minX)).count, 1, "all three carets line up in one column"
+        )
+        XCTAssertEqual(
+            rects.map(\.minY), (0...2).map { lineFragment(harness, line: $0).minY },
+            "one per line, in order, each on its own line fragment"
+        )
+    }
 }

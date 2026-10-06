@@ -246,3 +246,48 @@ clipboard means silently dropping or duplicating the user's lines.
   so on rows whose characters have different UTF-16 widths the carets can
   drift a unit or two apart. Cosmetic, and exact for ASCII.
 - Undo restores the text but not the rectangle (§4).
+- AppKit draws its own insertion indicator on the head row, above
+  `draw(_:)`, so that one caret may blink or look slightly wider than the
+  solid 1pt carets Writ draws on the other rows.
+- ⌥-double-click collapses to a plain caret instead of selecting a word.
+
+## 8. Manual verification
+
+The ⌥-drag tracking loop and the caret drawing cannot be checked headlessly
+— `NSTextView.mouseDown` runs a modal event-tracking loop that hangs a test
+process, and posting a synthetic mouse-up first does not rescue it. So they
+are verified by hand. Everything else in this document is covered by tests
+in `App/Tests/WritTextViewBlockSelectionTests.swift` and
+`WritTextViewBlockGestureTests.swift`.
+
+**Quit any running copy of Writ first**, or LaunchServices routes the
+fixture to the installed `/Applications/Writ.app` on the shared bundle id
+and the build under test comes up empty.
+
+Fixture — save as `block.md`, *with* a trailing newline after `kappa ten`:
+
+```
+alpha one
+bb
+gamma three
+delta four
+epsilon five
+zeta six
+eta seven
+theta eight
+iota nine
+kappa ten
+```
+
+| # | Step | Expected |
+|---|---|---|
+| 1 | ⌥-drag from before the `a` of `one` on line 1, down-right to mid-`three` on line 3 | A rectangle; left and right edges vertically aligned across lines 1–3 |
+| 2 | The same drag in reverse — line 3 up-left to line 1 | An identical rectangle; direction must not matter |
+| 3 | Shrink the window to ~6 visible lines, ⌥-drag from line 1 downward, hold the mouse still below the bottom edge for ~3 s | The document keeps scrolling and the rectangle grows with it. One step then a stall means the periodic-event path is broken |
+| 4 | ⌥-click once on line 5, no drag | A plain blinking caret, no highlight, no extra carets |
+| 5 | Caret on line 4, then ⌥⇧↓ four times, then type `- ` | A column of carets down lines 4–8 at one x; all five rows gain the prefix; one ⌘Z restores all five |
+| 6 | With the rectangle from #1 live, look at line 2 (`bb`) | A caret at its end rather than a highlight — it is shorter than the block's left edge |
+| 7 | Caret on line 10 (`kappa ten`), then ⌥⇧↓ once | A caret on the empty phantom line below it. Nothing drawn means the `extraLineFragmentTextContainer` branch is wrong |
+| 8 | With a block live: type `X`; ⌘Z; ⌘C and paste elsewhere; ⌘X; ⌘Z; ⌘V; Backspace | `X` replaces every fragment at once. ⌘C gives newline-joined fragments *including an empty line for `bb`*. Backspace eats one character per row and never joins lines. Each gesture is exactly one ⌘Z |
+| 9 | With a block live, click once elsewhere in the text | The rectangle disappears, leaving one ordinary caret. A surviving highlight or stray caret is a hole in the `setSelectedRange(s)` choke point (§5), not in `mouseDown` |
+| 10 | Click the preview pane to move focus, then ⌥-drag in the editor and type immediately | The editor takes focus and the typing fans out — `mouseDown` skips `super`, so it takes first responder itself |
