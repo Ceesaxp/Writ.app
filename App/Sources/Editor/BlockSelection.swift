@@ -158,8 +158,10 @@ struct BlockSelection: Equatable {
     /// rectangle at the document's end instead of trapping.
     ///
     /// A non-empty fragment is finally widened to whole composed character
-    /// sequences — see `snappedToGraphemes(_:in:)` for why outward, and why
-    /// the zero-length case is left alone.
+    /// sequences, and a zero-length one keeps its length but has its
+    /// *location* pulled back to the start of the grapheme it sits in — see
+    /// `snappedToGraphemes(_:notBefore:in:)` for why outward for the one and
+    /// leading-boundary for the other.
     func fragmentRanges(in index: LineIndex) -> [NSRange] {
         let lines = clampedLines(in: index)
         let columns = columnRange
@@ -170,7 +172,7 @@ struct BlockSelection: Equatable {
             let left = max(0, min(columns.lowerBound, lineLength))
             let right = max(left, min(columns.upperBound, lineLength))
             let range = NSRange(location: lineStart + left, length: right - left)
-            return BlockSelection.snappedToGraphemes(range, in: text)
+            return BlockSelection.snappedToGraphemes(range, notBefore: lineStart, in: text)
         }
     }
 
@@ -193,15 +195,48 @@ struct BlockSelection: Equatable {
     /// its own grapheme, so a fragment bounded by `lineLength` stays bounded
     /// by it.
     ///
-    /// **Zero length is exempt.** A zero-width block is N carets, and
-    /// `rangeOfComposedCharacterSequences` inflates *any* empty range to the
-    /// grapheme containing it — which would turn "insert at a caret" into
-    /// "replace a character", and at a line's end would swallow the
-    /// newline. A caret mid-grapheme is merely odd to look at; it corrupts
-    /// nothing.
-    private static func snappedToGraphemes(_ range: NSRange, in text: NSString) -> NSRange {
-        guard range.length > 0 else { return range }
+    /// **Zero length keeps its length and moves its location.** A zero-width
+    /// block is N carets, and `rangeOfComposedCharacterSequences` inflates
+    /// *any* empty range to the grapheme containing it — which would turn
+    /// "insert at a caret" into "replace a character", and at a line's end
+    /// would swallow the newline. So the length stays 0.
+    ///
+    /// The location does not. A caret left inside a grapheme is not merely
+    /// odd to look at: park a caret at column 2 of `xyzw`, extend the block
+    /// up into a row reading `a👍b`, and column 2 on that row falls between
+    /// the two UTF-16 units of the emoji. Typing there inserts between the
+    /// surrogates and leaves two lone surrogates in the document. So a
+    /// zero-length fragment snaps back to the start of the grapheme it sits
+    /// inside.
+    ///
+    /// **Leading boundary, not nearest.** Nearest would let one row snap
+    /// left while the next snapped right, and the rectangle would stop being
+    /// one column. Leading is also idempotent: a caret already on a boundary
+    /// does not move at all.
+    private static func snappedToGraphemes(_ range: NSRange, notBefore lineStart: Int, in text: NSString) -> NSRange {
+        guard range.length > 0 else {
+            let location = graphemeStart(at: range.location, notBefore: lineStart, in: text)
+            return NSRange(location: location, length: 0)
+        }
         return text.rangeOfComposedCharacterSequences(for: range)
+    }
+
+    /// UTF-16 offset of the first unit of the grapheme containing `offset`,
+    /// never earlier than `lineStart`.
+    ///
+    /// The lower bound is load-bearing, not belt-and-braces. Measured:
+    /// Foundation joins a `\n` to a combining mark that follows it —
+    /// `("x\n\u{0301}y" as NSString).rangeOfComposedCharacterSequence(at: 2)`
+    /// answers `{1, 2}`. Without the bound, a caret at the start of a line
+    /// that opens with a combining mark would snap onto the *previous*
+    /// line's newline, and that row would leave the rectangle it belongs to.
+    ///
+    /// The end of the text is the other guard: it is a perfectly good caret
+    /// position, and `rangeOfComposedCharacterSequence(at:)` treats it as out
+    /// of range.
+    private static func graphemeStart(at offset: Int, notBefore lineStart: Int, in text: NSString) -> Int {
+        guard offset > lineStart, offset < text.length else { return offset }
+        return max(lineStart, text.rangeOfComposedCharacterSequence(at: offset).location)
     }
 
     /// The block's fragments joined with `\n` — what Cmd-C should put on
@@ -228,10 +263,122 @@ struct BlockSelection: Equatable {
     /// an empty list: the one-edit-per-row shape is what the caller needs
     /// to place N carets afterwards, and with `replacement: ""` the edits
     /// are simply a no-op on the text.
+    ///
+    /// That is the opposite of what `backspaceEdits(in:)` and
+    /// `forwardDeleteEdits(in:)` do, and deliberately so: here every row
+    /// genuinely receives the typed text, so no row is a no-op and none may
+    /// be dropped. There, a row with nothing to delete contributes no edit
+    /// at all.
     func replacementEdits(with replacement: String, in index: LineIndex) -> [BlockEdit] {
         fragmentRanges(in: index)
             .reversed()
             .map { BlockEdit(range: $0, replacement: replacement) }
+    }
+
+    /// Edits for **Backspace** on the block, descending by `range.location`
+    /// on the same contract as `replacementEdits`.
+    ///
+    /// A non-empty block is simply deleted — identical to
+    /// `replacementEdits(with: "", in:)`. The selection is what goes; which
+    /// key asked for it does not matter.
+    ///
+    /// A zero-width block is N carets, and every row deletes **one grapheme
+    /// to its left**, so backspacing past a 👍 or an e + combining acute
+    /// takes the whole character rather than one UTF-16 unit or one scalar.
+    /// A caret at column 0 deletes nothing — see `caretDeletionEdits(in:_:)`
+    /// for that limit and the no-op rule that goes with it.
+    func backspaceEdits(in index: LineIndex) -> [BlockEdit] {
+        caretDeletionEdits(in: index, .backward)
+    }
+
+    /// Edits for **Forward Delete** on the block, descending by
+    /// `range.location` on the same contract as `replacementEdits`.
+    ///
+    /// The mirror of `backspaceEdits(in:)`: a non-empty block is simply
+    /// deleted, and a zero-width one deletes **one grapheme to the right**
+    /// on every row. A caret at end-of-line deletes nothing — in particular
+    /// it does not eat the `\n` and pull the next line up. See
+    /// `caretDeletionEdits(in:_:)`.
+    func forwardDeleteEdits(in index: LineIndex) -> [BlockEdit] {
+        caretDeletionEdits(in: index, .forward)
+    }
+
+    /// Which side of each caret a deletion takes its grapheme from.
+    private enum CaretDeletion {
+        case backward
+        case forward
+    }
+
+    /// One deletion per row, descending by location, with every row that has
+    /// nothing to delete **left out**.
+    ///
+    /// **Never crosses a line boundary.** A caret at column 0 contributes no
+    /// backspace; a caret at end-of-line contributes no forward delete. The
+    /// ordinary single-caret answer in both places is to join the two
+    /// lines — but a rectangle is *defined over* its rows, and joining lines
+    /// would dissolve the very rows the block exists on. The row is skipped
+    /// instead. This is why the two operations are modelled here rather than
+    /// left to the view: the limit is a property of the rectangle, not of a
+    /// keypress.
+    ///
+    /// **Never emits a no-op edit.** A skipped row is absent from the
+    /// result, not present as a zero-length edit replacing nothing. The
+    /// caller feeds these straight into
+    /// `shouldChangeText(inRanges:replacementStrings:)`, and a batch of pure
+    /// no-ops registers an empty undo group — a ⌘Z the user then has to
+    /// press for no visible reason. `[]` when every row is skipped is
+    /// therefore the right answer, and the caller is expected to handle it.
+    ///
+    /// Note the asymmetry with `replacementEdits`, which *does* return N
+    /// zero-length edits for a zero-width block. There every row genuinely
+    /// receives the typed text, so no row is a no-op and dropping one would
+    /// lose an edit. Here a skipped row has nothing to contribute at all.
+    private func caretDeletionEdits(in index: LineIndex, _ direction: CaretDeletion) -> [BlockEdit] {
+        guard isZeroWidth else { return replacementEdits(with: "", in: index) }
+        let text = index.source as NSString
+        return zip(clampedLines(in: index), fragmentRanges(in: index))
+            .reversed()
+            .compactMap { line, caret in
+                let lineStart = index.lineStart(line)
+                let target = switch direction {
+                case .backward:
+                    BlockSelection.graphemeBefore(caret.location, notBefore: lineStart, in: text)
+                case .forward:
+                    BlockSelection.graphemeAfter(caret.location, notAfter: lineStart + index.lineLength(line), in: text)
+                }
+                return target.map { BlockEdit(range: $0, replacement: "") }
+            }
+    }
+
+    /// UTF-16 range of the whole grapheme immediately *before* `offset`,
+    /// bounded below by `lowerBound`. Nil when the offset is already at the
+    /// bound, which is this model's way of saying "this row contributes
+    /// nothing".
+    ///
+    /// The range ends at `offset` rather than at the grapheme's own end, and
+    /// those are the same thing only because `fragmentRanges(in:)` has
+    /// already snapped every caret to a grapheme start — so `offset - 1` is
+    /// the *last* unit of the grapheme before it. The snap is a precondition
+    /// of this arithmetic, not an incidental tidiness.
+    private static func graphemeBefore(_ offset: Int, notBefore lowerBound: Int, in text: NSString) -> NSRange? {
+        guard offset > lowerBound else { return nil }
+        let start = graphemeStart(at: offset - 1, notBefore: lowerBound, in: text)
+        return NSRange(location: start, length: offset - start)
+    }
+
+    /// UTF-16 range of the whole grapheme immediately *after* `offset`,
+    /// bounded above by `upperBound`. Nil when the offset is already at the
+    /// bound — the row contributes nothing.
+    ///
+    /// The bound is the row's own line end, which is what keeps a forward
+    /// delete off the newline. It also truncates rather than overshooting in
+    /// the pathological case where Foundation reports a sequence that
+    /// straddles the line break.
+    private static func graphemeAfter(_ offset: Int, notAfter upperBound: Int, in text: NSString) -> NSRange? {
+        guard offset < upperBound else { return nil }
+        let sequence = text.rangeOfComposedCharacterSequence(at: offset)
+        let end = min(upperBound, sequence.location + sequence.length)
+        return NSRange(location: offset, length: end - offset)
     }
 
     /// Edits for pasting `clipboard` into the block, descending by

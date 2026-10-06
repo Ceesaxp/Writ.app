@@ -270,10 +270,18 @@ final class BlockSelectionTests: XCTestCase {
         }
     }
 
-    func testZeroWidthBlockStaysZeroWidthInsideAGrapheme() {
+    func testZeroWidthCaretSnapsToGraphemeStartAndStaysZeroWidth() {
         // Column 2 is the middle of the thumbs-up on line 0 and an ordinary
-        // boundary on line 1. Widening the carets would turn typing into
-        // overwriting on one row and not the other.
+        // boundary on line 1.
+        //
+        // This test was testZeroWidthBlockStaysZeroWidthInsideAGrapheme and
+        // asserted the carets came back at {2, 0} and {7, 0} — that the
+        // mid-pair caret did not move at all. Half of that was right and
+        // half was wrong. The *length* must stay 0, or N carets become N
+        // overwrites. But leaving the *location* between the two surrogates
+        // means typing there splits the pair, which
+        // testTypingIntoACaretInsideAGraphemeDoesNotCorruptTheDocument
+        // demonstrates on the document. So row 0's caret snaps 2 -> 1.
         let source = "a\u{1F44D}b\nxyzw"
         let index = LineIndex(source)
         let selection = BlockSelection(
@@ -285,12 +293,189 @@ final class BlockSelectionTests: XCTestCase {
 
         XCTAssertTrue(selection.isZeroWidth)
         XCTAssertEqual(
-            ranges, [NSRange(location: 2, length: 0), NSRange(location: 7, length: 0)],
-            "a caret inside a grapheme stays a caret — snapping it would make N carets into N overwrites"
+            ranges, [NSRange(location: 1, length: 0), NSRange(location: 7, length: 0)],
+            "the mid-pair caret snaps back to the emoji's leading boundary; the row that was already on a boundary does not move"
         )
         XCTAssertTrue(
             ranges.allSatisfy { $0.length == 0 },
-            "every row of a zero-width block is an insertion point, including the one mid-pair"
+            "every row of a zero-width block stays an insertion point — the snap moves carets, it never widens them"
+        )
+    }
+
+    func testZeroWidthCaretSnapsOutOfCombiningSequence() {
+        // Line 0 is "éx" as e + combining acute + x, so column 1 sits
+        // between the base character and its mark.
+        let source = "e\u{0301}x\nabc"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 1),
+            head: BlockPosition(line: 1, column: 1)
+        )
+
+        XCTAssertEqual(
+            selection.fragmentRanges(in: index),
+            [NSRange(location: 0, length: 0), NSRange(location: 5, length: 0)],
+            "a caret between a base character and its combining mark snaps back to the base"
+        )
+    }
+
+    func testZeroWidthCaretSnapDoesNotLeaveItsOwnLine() {
+        // Pathological but reachable: line 1 opens with two combining marks,
+        // and Foundation joins a newline to the marks that follow it —
+        // rangeOfComposedCharacterSequence(at: 3) here is {1, 3}, which
+        // starts on line 0's newline. The snap is bounded by the row's own
+        // line start precisely so one row cannot step out of the rectangle.
+        let source = "x\n\u{0301}\u{0302}y\nzz"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 1),
+            head: BlockPosition(line: 2, column: 1)
+        )
+
+        let ranges = selection.fragmentRanges(in: index)
+
+        XCTAssertEqual(
+            ranges, [NSRange(location: 1, length: 0), NSRange(location: 2, length: 0), NSRange(location: 7, length: 0)],
+            "row 1's caret clamps to its own line start instead of snapping onto the previous line's newline"
+        )
+        for (line, range) in zip(0..., ranges) {
+            XCTAssertGreaterThanOrEqual(range.location, index.lineStart(line), "row \(line): \(range) snapped out of its line")
+            XCTAssertLessThanOrEqual(
+                range.location, index.lineStart(line) + index.lineLength(line),
+                "row \(line): \(range) snapped past its line's last unit"
+            )
+        }
+    }
+
+    func testZeroWidthCaretOnBoundaryDoesNotMove() {
+        let plain = LineIndex("one\ntwo\nthree")
+        let plainCarets = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 2),
+            head: BlockPosition(line: 2, column: 2)
+        )
+        XCTAssertEqual(
+            plainCarets.fragmentRanges(in: plain),
+            [NSRange(location: 2, length: 0), NSRange(location: 6, length: 0), NSRange(location: 10, length: 0)],
+            "nothing in plain text sits inside a grapheme, so no caret may move"
+        )
+
+        // Column 1 is the thumbs-up's *leading* boundary on line 0 and an
+        // ordinary one on line 1: already the answer the snap would give.
+        let emoji = LineIndex("a\u{1F44D}b\nxyzw")
+        let onLeadingBoundary = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 1),
+            head: BlockPosition(line: 1, column: 1)
+        )
+        XCTAssertEqual(
+            onLeadingBoundary.fragmentRanges(in: emoji),
+            [NSRange(location: 1, length: 0), NSRange(location: 6, length: 0)],
+            "a caret already at a grapheme start stays exactly where it is"
+        )
+
+        // Column 3 is the trailing boundary of the same emoji — the start of
+        // the next grapheme, so it must not be dragged back over the emoji.
+        let afterTheEmoji = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 3),
+            head: BlockPosition(line: 1, column: 3)
+        )
+        XCTAssertEqual(
+            afterTheEmoji.fragmentRanges(in: emoji)[0], NSRange(location: 3, length: 0),
+            "a caret just past a multi-unit grapheme is on the next grapheme's start, not inside the previous one"
+        )
+    }
+
+    func testZeroWidthCaretAtEndOfLineDoesNotMove() {
+        // Line 0 ends in a surrogate pair, so a caret at its end has a
+        // multi-unit grapheme behind it; line 1 ends at the end of the
+        // document, which is the offset rangeOfComposedCharacterSequence(at:)
+        // treats as out of range.
+        let source = "ab\u{1F44D}\nzz"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 99),
+            head: BlockPosition(line: 1, column: 99)
+        )
+
+        let ranges = selection.fragmentRanges(in: index)
+
+        XCTAssertEqual(
+            ranges, [NSRange(location: 4, length: 0), NSRange(location: 7, length: 0)],
+            "an end-of-line caret is already on a boundary and must not be pulled back into the emoji, "
+                + "and the end-of-document caret must survive the guard rather than trapping"
+        )
+    }
+
+    func testCaretSnapIsIdempotent() {
+        // Checked through the public path, not the raw NSString call: where
+        // the snap clamps to a line start, re-asking Foundation would still
+        // answer with the previous line's offset, and only the model's own
+        // bound makes the operation stable.
+        for source in ["a\u{1F44D}b\nxyzw", "e\u{0301}x\nabc", "x\n\u{0301}\u{0302}y\nzz", "plain\ntext"] {
+            let index = LineIndex(source)
+            for column in 0...6 {
+                let block = BlockSelection(
+                    anchor: BlockPosition(line: 0, column: column),
+                    head: BlockPosition(line: index.lineCount - 1, column: column)
+                )
+
+                for (line, caret) in zip(0..., block.fragmentRanges(in: index)) {
+                    let snappedColumn = caret.location - index.lineStart(line)
+                    let resnapped = BlockSelection(
+                        anchor: BlockPosition(line: line, column: snappedColumn),
+                        head: BlockPosition(line: line, column: snappedColumn)
+                    )
+                    XCTAssertEqual(
+                        resnapped.fragmentRanges(in: index), [caret],
+                        "\(source.debugDescription) column \(column) row \(line): snapping \(caret) a second time moved it"
+                    )
+                }
+            }
+        }
+    }
+
+    /// The bug the leading-boundary snap exists for.
+    ///
+    /// Caret at column 2 of `xyzw`, then ⌥⇧↑ into `a👍b`: one rectangle,
+    /// column 2 on both rows, and on row 0 column 2 falls *between* the two
+    /// UTF-16 units of the thumbs-up. Inserting there writes the typed text
+    /// between a high and a low surrogate and leaves two lone surrogates in
+    /// the document.
+    ///
+    /// The corruption has to be detected through `unicodeScalars`. Measured:
+    /// a `String` that came from an `NSMutableString` holding lone surrogates
+    /// shows `U+FFFD` in its scalar view and compares equal to the literal
+    /// with those scalars, yet `contains("\u{FFFD}")` on it answers **false**
+    /// — most likely because that overload is Foundation's `range(of:)`,
+    /// searching the original UTF-16 where no `U+FFFD` exists. The mechanism
+    /// is inferred; the behaviour is measured, as is `firstIndex(of:)`
+    /// answering **true** on the same string. The UTF-8 round trip is
+    /// weaker still: the scalar view is already repaired, so it re-encodes
+    /// cleanly either way. Both are asserted below because they are cheap,
+    /// but the scalar scan and the exact document are the assertions with
+    /// teeth.
+    func testTypingIntoACaretInsideAGraphemeDoesNotCorruptTheDocument() {
+        let source = "a\u{1F44D}b\nxyzw"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 2),
+            head: BlockPosition(line: 1, column: 2)
+        )
+
+        let typed = apply(selection.replacementEdits(with: "-", in: index), to: source)
+
+        XCTAssertFalse(
+            typed.unicodeScalars.contains { $0.value == 0xFFFD },
+            "typing into a caret inside the surrogate pair split it, leaving replacement characters: "
+                + typed.debugDescription
+        )
+        XCTAssertFalse(typed.contains("\u{FFFD}"), "no replacement character may survive in the document")
+        XCTAssertEqual(
+            String(decoding: Data(typed.utf8), as: UTF8.self), typed,
+            "the edited document must round-trip through UTF-8 losslessly"
+        )
+        XCTAssertEqual(
+            typed, "a-\u{1F44D}b\nxy-zw",
+            "row 0's caret snaps back to the emoji's leading boundary, so the text lands before the whole emoji"
         )
     }
 
@@ -386,6 +571,217 @@ final class BlockSelectionTests: XCTestCase {
 
         XCTAssertTrue(edits.allSatisfy { $0.range.length == 0 }, "a zero-width block has nothing to remove on any row")
         XCTAssertEqual(apply(edits, to: source), source, "deleting a zero-width block must leave the document untouched")
+    }
+
+    // MARK: - backspaceEdits / forwardDeleteEdits
+
+    func testBackspaceOnZeroWidthBlockDeletesOneGraphemePerRow() {
+        let source = "one\ntwo\nthree"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 1),
+            head: BlockPosition(line: 2, column: 1)
+        )
+
+        let edits = selection.backspaceEdits(in: index)
+
+        XCTAssertEqual(edits.count, 3, "three carets, three deletions")
+        XCTAssertEqual(edits.map(\.range), [NSRange(location: 8, length: 1), NSRange(location: 4, length: 1), NSRange(location: 0, length: 1)])
+        XCTAssertEqual(Set(edits.map(\.replacement)), [""], "a deletion replaces with nothing")
+        XCTAssertEqual(apply(edits, to: source), "ne\nwo\nhree", "each row loses the one character to the left of its caret")
+    }
+
+    func testForwardDeleteOnZeroWidthBlockDeletesOneGraphemePerRow() {
+        // Row 0's caret sits on the thumbs-up's leading boundary, so the
+        // grapheme to its right is two UTF-16 units wide.
+        let source = "a\u{1F44D}b\nxyzw"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 1),
+            head: BlockPosition(line: 1, column: 1)
+        )
+
+        let edits = selection.forwardDeleteEdits(in: index)
+
+        XCTAssertEqual(
+            edits.map(\.range), [NSRange(location: 6, length: 1), NSRange(location: 1, length: 2)],
+            "each row deletes the whole grapheme to the right of its caret, which is two units wide on row 0"
+        )
+        let deleted = apply(edits, to: source)
+        XCTAssertEqual(deleted, "ab\nxzw")
+        XCTAssertFalse(
+            deleted.unicodeScalars.contains { $0.value == 0xFFFD },
+            "deleting half a surrogate pair would leave a replacement character: " + deleted.debugDescription
+        )
+    }
+
+    func testBackspaceOnNonEmptyBlockDeletesTheSelection() {
+        let source = "one\ntwo\nthree"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 1),
+            head: BlockPosition(line: 2, column: 3)
+        )
+
+        let deleteTheSelection = selection.replacementEdits(with: "", in: index)
+
+        XCTAssertEqual(
+            selection.backspaceEdits(in: index), deleteTheSelection,
+            "with a rectangle selected, Backspace deletes the rectangle — the direction of the key is irrelevant"
+        )
+        XCTAssertEqual(
+            selection.forwardDeleteEdits(in: index), deleteTheSelection,
+            "and so does Forward Delete, identically"
+        )
+        XCTAssertEqual(apply(selection.backspaceEdits(in: index), to: source), "o\nt\ntee")
+    }
+
+    func testBackspaceDeletesWholeGraphemeNotOneCodeUnit() {
+        // Row 0 is "a👍" and the caret sits at its end, so the character to
+        // the left is two UTF-16 units. Deleting one unit would leave a lone
+        // surrogate in the document.
+        let source = "a\u{1F44D}\nxyz"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 3),
+            head: BlockPosition(line: 1, column: 3)
+        )
+
+        let edits = selection.backspaceEdits(in: index)
+
+        XCTAssertEqual(
+            edits.map(\.range), [NSRange(location: 6, length: 1), NSRange(location: 1, length: 2)],
+            "the emoji row deletes two units — the whole grapheme — and the ASCII row deletes one"
+        )
+        let deleted = apply(edits, to: source)
+        XCTAssertEqual(deleted, "a\nxy")
+        XCTAssertFalse(
+            deleted.unicodeScalars.contains { $0.value == 0xFFFD },
+            "deleting a single code unit would strand a surrogate: " + deleted.debugDescription
+        )
+    }
+
+    func testBackspaceAtColumnZeroSkipsTheRow() {
+        // The middle line is empty, so the block's column 1 clamps to column
+        // 0 on it: a caret with nothing to its left on its own line.
+        let source = "ab\n\ncd"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 1),
+            head: BlockPosition(line: 2, column: 1)
+        )
+
+        let edits = selection.backspaceEdits(in: index)
+
+        XCTAssertEqual(
+            edits.map(\.range), [NSRange(location: 4, length: 1), NSRange(location: 0, length: 1)],
+            "the empty row is simply absent from the result — two rows contribute, not three"
+        )
+        XCTAssertFalse(
+            edits.contains { $0.range.location == index.lineStart(1) },
+            "no edit may be placed on the skipped row"
+        )
+        XCTAssertEqual(
+            apply(edits, to: source), "b\n\nd",
+            "both newlines survive: the row at column 0 is skipped, not joined to the line above it"
+        )
+    }
+
+    func testBackspaceWithEveryCaretAtColumnZeroReturnsNoEdits() {
+        let source = "one\ntwo\nthree"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 0),
+            head: BlockPosition(line: 2, column: 0)
+        )
+
+        XCTAssertEqual(
+            selection.backspaceEdits(in: index), [],
+            "no row has anything to its left, so the whole gesture is empty — N no-op edits would register an empty undo group"
+        )
+        XCTAssertEqual(
+            selection.replacementEdits(with: "", in: index).count, 3,
+            "the contrast with replacementEdits is deliberate: there every row receives the replacement, so none is dropped"
+        )
+    }
+
+    func testForwardDeleteAtEndOfLineSkipsTheRow() {
+        // Column 3 is the end of "abc" and the middle of "defgh".
+        let source = "abc\ndefgh"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 3),
+            head: BlockPosition(line: 1, column: 3)
+        )
+
+        let edits = selection.forwardDeleteEdits(in: index)
+
+        XCTAssertEqual(edits.map(\.range), [NSRange(location: 7, length: 1)], "only the row with a character to its right contributes")
+        XCTAssertFalse(
+            edits.contains { $0.range.location <= 3 && 3 < $0.range.location + $0.range.length },
+            "offset 3 is the newline; deleting it would pull the next line up and dissolve the block's rows"
+        )
+        let deleted = apply(edits, to: source)
+        XCTAssertEqual(deleted, "abc\ndefh")
+        XCTAssertEqual(LineIndex(deleted).lineCount, 2, "the document still has two lines — the newline was not eaten")
+    }
+
+    func testDeleteEditsAreSortedDescendingByLocation() {
+        let source = "alpha\nbravo\ncharlie\ndelta"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 2),
+            head: BlockPosition(line: 3, column: 2)
+        )
+
+        let backspace = selection.backspaceEdits(in: index)
+        let forwardDelete = selection.forwardDeleteEdits(in: index)
+
+        XCTAssertEqual(
+            backspace.map(\.range.location), [21, 13, 7, 1],
+            "bottom-up, so applying them in order leaves the not-yet-applied offsets valid"
+        )
+        XCTAssertEqual(forwardDelete.map(\.range.location), [22, 14, 8, 2])
+        for edits in [backspace, forwardDelete] {
+            XCTAssertEqual(
+                edits.map(\.range.location), edits.map(\.range.location).sorted(by: >),
+                "every delete path owes the same descending-order contract as replacementEdits"
+            )
+        }
+        XCTAssertEqual(apply(backspace, to: source), "apha\nbavo\ncarlie\ndlta")
+        XCTAssertEqual(apply(forwardDelete, to: source), "alha\nbrvo\nchrlie\ndeta")
+    }
+
+    func testDeleteEditsNeverCrossALineBoundary() {
+        // The first fixture is the pathological one: line 1 opens with two
+        // combining marks that Foundation reports as one sequence with the
+        // *previous* line's newline, so an unbounded grapheme walk would
+        // delete across the break.
+        let sources = ["x\n\u{0301}\u{0302}y\nzz", "a\u{1F44D}b\nxyzw", "ab\n\ncd", "one\ntwo\nthree"]
+        for source in sources {
+            let index = LineIndex(source)
+            let text = source as NSString
+            for column in 0...5 {
+                let selection = BlockSelection(
+                    anchor: BlockPosition(line: 0, column: column),
+                    head: BlockPosition(line: index.lineCount - 1, column: column)
+                )
+
+                for edits in [selection.backspaceEdits(in: index), selection.forwardDeleteEdits(in: index)] {
+                    for edit in edits {
+                        let line = index.position(forUTF16Offset: edit.range.location).line
+                        let lineStart = index.lineStart(line)
+                        let lineEnd = lineStart + index.lineLength(line)
+                        let where_ = "\(source.debugDescription) column \(column) row \(line): \(edit.range)"
+
+                        XCTAssertGreaterThanOrEqual(edit.range.location, lineStart, "\(where_) starts before its own line")
+                        XCTAssertLessThanOrEqual(edit.range.location + edit.range.length, lineEnd, "\(where_) ends past its own line")
+                        XCTAssertGreaterThan(edit.range.length, 0, "\(where_) is a no-op and should have been left out")
+                        XCTAssertFalse(text.substring(with: edit.range).contains("\n"), "\(where_) covers a line break")
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - pasteEdits
