@@ -159,9 +159,11 @@ struct BlockSelection: Equatable {
     ///
     /// A non-empty fragment is finally widened to whole composed character
     /// sequences, and a zero-length one keeps its length but has its
-    /// *location* pulled back to the start of the grapheme it sits in — see
-    /// `snappedToGraphemes(_:notBefore:in:)` for why outward for the one and
-    /// leading-boundary for the other.
+    /// *location* pulled back to the start of the grapheme it sits in. Both
+    /// adjustments are then clamped back into the row's own line, which is
+    /// what keeps the newline promise above true — see
+    /// `snappedToGraphemes(_:notBefore:notAfter:in:)` for why outward for
+    /// the one, leading-boundary for the other, and bounded for both.
     func fragmentRanges(in index: LineIndex) -> [NSRange] {
         let lines = clampedLines(in: index)
         let columns = columnRange
@@ -172,7 +174,9 @@ struct BlockSelection: Equatable {
             let left = max(0, min(columns.lowerBound, lineLength))
             let right = max(left, min(columns.upperBound, lineLength))
             let range = NSRange(location: lineStart + left, length: right - left)
-            return BlockSelection.snappedToGraphemes(range, notBefore: lineStart, in: text)
+            return BlockSelection.snappedToGraphemes(
+                range, notBefore: lineStart, notAfter: lineStart + lineLength, in: text
+            )
         }
     }
 
@@ -191,9 +195,30 @@ struct BlockSelection: Equatable {
     /// **Outward, never inward.** An edge inside a grapheme takes the whole
     /// grapheme rather than dropping it — the same adjustment `NSTextView`
     /// makes to its own selections, so the model agrees with the view
-    /// instead of fighting it. The widening cannot escape the line: `\n` is
-    /// its own grapheme, so a fragment bounded by `lineLength` stays bounded
-    /// by it.
+    /// instead of fighting it.
+    ///
+    /// **The widening can escape the line, so it is clamped to the row.** Do
+    /// not "simplify" the `notBefore`/`notAfter` bounds away on the grounds
+    /// that `\n` is its own grapheme: it is not, in Foundation's reckoning,
+    /// when a combining mark follows it. Measured —
+    /// `("x\n\u{0301}y" as NSString).rangeOfComposedCharacterSequences(for: NSRange(location: 2, length: 1))`
+    /// answers `{1, 2}`, a range that *starts on the previous line's
+    /// newline*. The hazard is any left edge landing inside that joined
+    /// sequence, not only column 0: on `"ab\n\u{0301}\u{0302}y"` the
+    /// column-1 fragment `{4, 1}` widens to `{2, 3}` and starts on the
+    /// newline too. An escaped fragment would put that row's edit on the
+    /// line above, outside the rectangle it belongs to, and the file's
+    /// promise that a fragment never covers a newline would be false.
+    ///
+    /// The forward bound is defensive rather than demonstrated. Swept
+    /// exhaustively over every sub-fragment of eleven fixtures — combining
+    /// marks, ZWJ, regional indicators, Hangul jamo, variation selectors,
+    /// Thai vowel signs — the backward escape fires 17 times and the forward
+    /// escape never does, because a `\n` is always the *start* of the
+    /// sequence Foundation joins it into and so a fragment ending at
+    /// `lineLength` already ends on a boundary. The bound takes the same
+    /// stance as `graphemeAfter(_:notAfter:in:)`: cheap, symmetric, and no
+    /// longer a claim about Foundation that a later release can falsify.
     ///
     /// **Zero length keeps its length and moves its location.** A zero-width
     /// block is N carets, and `rangeOfComposedCharacterSequences` inflates
@@ -213,12 +238,20 @@ struct BlockSelection: Equatable {
     /// left while the next snapped right, and the rectangle would stop being
     /// one column. Leading is also idempotent: a caret already on a boundary
     /// does not move at all.
-    private static func snappedToGraphemes(_ range: NSRange, notBefore lineStart: Int, in text: NSString) -> NSRange {
+    private static func snappedToGraphemes(
+        _ range: NSRange, notBefore lineStart: Int, notAfter lineEnd: Int, in text: NSString
+    ) -> NSRange {
         guard range.length > 0 else {
             let location = graphemeStart(at: range.location, notBefore: lineStart, in: text)
             return NSRange(location: location, length: 0)
         }
-        return text.rangeOfComposedCharacterSequences(for: range)
+        let widened = text.rangeOfComposedCharacterSequences(for: range)
+        // The clamp cannot invert the range: the caller builds `range` inside
+        // `lineStart...lineEnd` and the widening only grows it, so the
+        // clamped bounds still straddle at least `range`.
+        let start = max(lineStart, widened.location)
+        let end = min(lineEnd, widened.location + widened.length)
+        return NSRange(location: start, length: end - start)
     }
 
     /// UTF-16 offset of the first unit of the grapheme containing `offset`,
@@ -261,14 +294,25 @@ struct BlockSelection: Equatable {
     ///
     /// A zero-width block yields one zero-length edit per row rather than
     /// an empty list: the one-edit-per-row shape is what the caller needs
-    /// to place N carets afterwards, and with `replacement: ""` the edits
-    /// are simply a no-op on the text.
+    /// to place N carets afterwards.
     ///
-    /// That is the opposite of what `backspaceEdits(in:)` and
-    /// `forwardDeleteEdits(in:)` do, and deliberately so: here every row
-    /// genuinely receives the typed text, so no row is a no-op and none may
-    /// be dropped. There, a row with nothing to delete contributes no edit
-    /// at all.
+    /// **This method is never filtered, and that asymmetry with the delete
+    /// paths is the subtlest thing in this file.** A zero-length range here
+    /// is not a no-op — paired with a non-empty replacement it is an
+    /// *insert*, and inserting at N carets at once is the whole zero-width
+    /// block feature. Only the *combination* of a zero-length range and an
+    /// empty replacement replaces nothing with nothing, and that combination
+    /// is reachable here only via `replacement: ""`, where the caller has
+    /// explicitly asked for "replace the rectangle with nothing" and is
+    /// entitled to one edit per row whatever each row's fragment measured.
+    ///
+    /// `backspaceEdits(in:)` and `forwardDeleteEdits(in:)` take the opposite
+    /// choice for the same reason read the other way round: their
+    /// replacement is *always* `""`, so there a zero-length range can only
+    /// ever be a no-op, and they drop it. Deleting a rectangle through this
+    /// method and deleting it with Backspace therefore agree on every row
+    /// that has something to delete and differ on every row that does not —
+    /// see `caretDeletionEdits(in:_:)`.
     func replacementEdits(with replacement: String, in index: LineIndex) -> [BlockEdit] {
         fragmentRanges(in: index)
             .reversed()
@@ -278,9 +322,12 @@ struct BlockSelection: Equatable {
     /// Edits for **Backspace** on the block, descending by `range.location`
     /// on the same contract as `replacementEdits`.
     ///
-    /// A non-empty block is simply deleted — identical to
-    /// `replacementEdits(with: "", in:)`. The selection is what goes; which
-    /// key asked for it does not matter.
+    /// A non-empty block is simply deleted — `replacementEdits(with: "",
+    /// in:)` **minus any row that had nothing to delete**. The selection is
+    /// what goes; which key asked for it does not matter. The subtraction is
+    /// not a detail: a block can be non-empty and still overhang a short
+    /// row, whose fragment then clamps to zero length, and in the limit
+    /// overhang *every* row and return `[]`.
     ///
     /// A zero-width block is N carets, and every row deletes **one grapheme
     /// to its left**, so backspacing past a 👍 or an e + combining acute
@@ -295,7 +342,8 @@ struct BlockSelection: Equatable {
     /// `range.location` on the same contract as `replacementEdits`.
     ///
     /// The mirror of `backspaceEdits(in:)`: a non-empty block is simply
-    /// deleted, and a zero-width one deletes **one grapheme to the right**
+    /// deleted, minus any row with nothing to delete, and a zero-width one
+    /// deletes **one grapheme to the right**
     /// on every row. A caret at end-of-line deletes nothing — in particular
     /// it does not eat the `\n` and pull the next line up. See
     /// `caretDeletionEdits(in:_:)`.
@@ -321,33 +369,58 @@ struct BlockSelection: Equatable {
     /// left to the view: the limit is a property of the rectangle, not of a
     /// keypress.
     ///
-    /// **Never emits a no-op edit.** A skipped row is absent from the
-    /// result, not present as a zero-length edit replacing nothing. The
-    /// caller feeds these straight into
+    /// **Never emits a no-op edit, on either branch.** A skipped row is
+    /// absent from the result, not present as a zero-length edit replacing
+    /// nothing. The caller feeds these straight into
     /// `shouldChangeText(inRanges:replacementStrings:)`, and a batch of pure
     /// no-ops registers an empty undo group — a ⌘Z the user then has to
     /// press for no visible reason. `[]` when every row is skipped is
     /// therefore the right answer, and the caller is expected to handle it.
     ///
+    /// "Either branch" is the part that is easy to get wrong, because two
+    /// plausible rules collide here. A non-empty block deletes like
+    /// `replacementEdits(with: "")`; and no delete path may emit a no-op.
+    /// They disagree whenever a non-empty block overhangs a short row:
+    /// `"ab\ncd"` with columns `5..<8` clamps *every* fragment to a
+    /// zero-length range at its row's end, so following the first rule alone
+    /// would return two edits that each replace nothing with nothing — the
+    /// exact empty undo group the second rule exists to prevent. **The no-op
+    /// rule wins.** So the zero-width block is not the only way to reach
+    /// `[]`, and the "identical to `replacementEdits`" shorthand for the
+    /// non-empty case is true only of the rows that had something to delete.
+    ///
     /// Note the asymmetry with `replacementEdits`, which *does* return N
-    /// zero-length edits for a zero-width block. There every row genuinely
-    /// receives the typed text, so no row is a no-op and dropping one would
-    /// lose an edit. Here a skipped row has nothing to contribute at all.
+    /// zero-length edits for a zero-width block. There the replacement may
+    /// be non-empty, so a zero-length range is an insert rather than a
+    /// no-op, and dropping it would lose an edit. Here the replacement is
+    /// always `""`, so a zero-length range can only be a no-op. The
+    /// asymmetry is in what a zero-length range *means* on each path, not in
+    /// how carefully each path was written.
     private func caretDeletionEdits(in index: LineIndex, _ direction: CaretDeletion) -> [BlockEdit] {
-        guard isZeroWidth else { return replacementEdits(with: "", in: index) }
         let text = index.source as NSString
-        return zip(clampedLines(in: index), fragmentRanges(in: index))
-            .reversed()
-            .compactMap { line, caret in
-                let lineStart = index.lineStart(line)
-                let target = switch direction {
-                case .backward:
-                    BlockSelection.graphemeBefore(caret.location, notBefore: lineStart, in: text)
-                case .forward:
-                    BlockSelection.graphemeAfter(caret.location, notAfter: lineStart + index.lineLength(line), in: text)
+        let candidates: [BlockEdit] = if isZeroWidth {
+            zip(clampedLines(in: index), fragmentRanges(in: index))
+                .reversed()
+                .compactMap { line, caret in
+                    let lineStart = index.lineStart(line)
+                    let target = switch direction {
+                    case .backward:
+                        BlockSelection.graphemeBefore(caret.location, notBefore: lineStart, in: text)
+                    case .forward:
+                        BlockSelection.graphemeAfter(caret.location, notAfter: lineStart + index.lineLength(line), in: text)
+                    }
+                    return target.map { BlockEdit(range: $0, replacement: "") }
                 }
-                return target.map { BlockEdit(range: $0, replacement: "") }
-            }
+        } else {
+            replacementEdits(with: "", in: index)
+        }
+        // The no-op rule, stated once and applied to both branches. Every
+        // replacement produced above is `""`, so on this path a zero-length
+        // range means "replaces nothing with nothing" and cannot mean
+        // anything else — which is exactly why the rule can live here as a
+        // single filter instead of being threaded through two branches that
+        // reach the same shape for different reasons.
+        return candidates.filter { $0.range.length > 0 }
     }
 
     /// UTF-16 range of the whole grapheme immediately *before* `offset`,

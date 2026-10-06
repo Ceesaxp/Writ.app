@@ -160,6 +160,29 @@ final class BlockSelectionTests: XCTestCase {
 
     // MARK: - Grapheme snapping
 
+    /// Corruption has to be asserted on the scalar view or on the exact
+    /// expected value; the obvious-looking guards do not work.
+    ///
+    /// This test used to carry four checks, three of which could not fail,
+    /// and they are recorded here so nobody adds them back. Measured:
+    ///
+    ///  - `contains("\u{FFFD}")` answers **false** on a string that
+    ///    demonstrably holds U+FFFD. That overload is `range(of:)`, whose
+    ///    search follows Foundation's own reckoning of the original UTF-16
+    ///    rather than the repaired scalar view. `firstIndex(of:)` and
+    ///    `unicodeScalars.contains { $0.value == 0xFFFD }` both answer true.
+    ///    The same defect applies to `contains("\n")` — see
+    ///    `testNonEmptyFragmentNeverSwallowsTheNewline`.
+    ///  - a lone-surrogate scan over `unicodeScalars` can **never** fire:
+    ///    `Unicode.Scalar` cannot hold a surrogate, so Swift has already
+    ///    repaired any to U+FFFD by the time the scan runs.
+    ///  - a `Data(utf8)` → `String(decoding:as:)` round trip passes on an
+    ///    already-repaired string, so it re-encodes cleanly either way.
+    ///
+    /// What is left bites: the fragment ranges, the copied string, and the
+    /// edited document, each as an exact value, plus the scalar-value
+    /// U+FFFD scan. Each was confirmed red by reverting the non-empty snap
+    /// to the identity.
     func testFragmentRangeSnapsOutwardOverSurrogatePair() {
         // Line 0 is "a👍b": 4 UTF-16 units, the thumbs-up occupying 1...2.
         // Column 2 is therefore a valid boundary on line 1 and the middle of
@@ -181,14 +204,20 @@ final class BlockSelectionTests: XCTestCase {
         let copied = selection.copyString(in: index)
 
         XCTAssertEqual(copied, "a\u{1F44D}\nxy", "the copied rectangle contains the whole emoji, not half of one")
-        XCTAssertFalse(copied.contains("\u{FFFD}"), "a split pair would surface as a replacement character once bridged back to String")
         XCTAssertFalse(
-            copied.unicodeScalars.contains { (0xD800...0xDFFF).contains($0.value) },
-            "no lone surrogate may reach the pasteboard"
+            copied.unicodeScalars.contains { $0.value == 0xFFFD },
+            "a split pair surfaces as a replacement character once bridged back to String: " + copied.debugDescription
         )
-        XCTAssertEqual(
-            String(decoding: Data(copied.utf8), as: UTF8.self), copied,
-            "the copied string round-trips through UTF-8 losslessly"
+
+        // The same rectangle applied to the document, not just read off it:
+        // a right edge left between the surrogates would delete one half of
+        // the pair and strand the other in the text.
+        let deleted = apply(selection.replacementEdits(with: "", in: index), to: source)
+
+        XCTAssertEqual(deleted, "b\nzw", "deleting the rectangle removes the whole emoji and leaves the rest of each row")
+        XCTAssertFalse(
+            deleted.unicodeScalars.contains { $0.value == 0xFFFD },
+            "deleting half a surrogate pair strands the other half: " + deleted.debugDescription
         )
     }
 
@@ -223,9 +252,13 @@ final class BlockSelectionTests: XCTestCase {
     func testSnappingNeverCrossesTheLineBreak() {
         // Line 0 ends in a surrogate pair and line 1 ends in a combining
         // mark, so a right edge at end-of-line sits against a \n on both the
-        // non-BMP and the combining case. Line 2 opens straight after a
-        // combining mark, so a left edge at column 0 could only reach the
-        // previous line by widening backwards over the newline.
+        // non-BMP and the combining case. Note what this fixture does NOT
+        // reach: its combining mark sits after `q`, mid-line, and Foundation
+        // joins a newline only to marks that *follow* it. So no left edge
+        // here can widen backwards over a newline — this suite was green at
+        // 50 tests with exactly that bug present. That case belongs to
+        // `testNonEmptyFragmentNeverSwallowsTheNewline`, whose fixture opens
+        // a line with the mark.
         let source = "ab\u{1F44D}\nq\u{0301}\nzz"
         let index = LineIndex(source)
         let text = source as NSString
@@ -242,10 +275,80 @@ final class BlockSelectionTests: XCTestCase {
                 let end = start + index.lineLength(line)
                 XCTAssertGreaterThanOrEqual(range.location, start, "columns \(left)..<\(right) row \(line): \(range) widened back into the previous line")
                 XCTAssertLessThanOrEqual(range.location + range.length, end, "columns \(left)..<\(right) row \(line): \(range) widened past the line's last unit")
+                // `.utf16.contains(0x0A)`, not `contains("\n")`: the String
+                // overload of `contains` resolves to Foundation's range(of:)
+                // and answers false on "\n\u{0301}", whose first Character
+                // *is* a newline.
                 XCTAssertFalse(
-                    text.substring(with: range).contains("\n"),
+                    text.substring(with: range).utf16.contains(0x0A),
                     "columns \(left)..<\(right) row \(line): \(range) covered a line break"
                 )
+            }
+        }
+    }
+
+    /// The non-empty twin of `testZeroWidthCaretSnapDoesNotLeaveItsOwnLine`.
+    ///
+    /// `testSnappingNeverCrossesTheLineBreak` does not reach this case: its
+    /// fixture's second and third lines open with ordinary characters, and a
+    /// combining mark at the *end* of a line is harmless — Foundation joins a
+    /// `\n` to the marks that **follow** it, not the ones before it. So the
+    /// fixture here has to open a line with a mark.
+    func testNonEmptyFragmentNeverSwallowsTheNewline() {
+        // Line 1 is "\u{0301}y", and measured:
+        // ("x\n\u{0301}y\nzz" as NSString).rangeOfComposedCharacterSequences(
+        // for: {2, 1}) answers {1, 2} — a range that starts on line 0's
+        // newline. So a non-empty fragment at column 0 of line 1 widens
+        // backwards out of its own row unless the snap clamps it.
+        let source = "x\n\u{0301}y\nzz"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 0),
+            head: BlockPosition(line: 2, column: 1)
+        )
+
+        let ranges = selection.fragmentRanges(in: index)
+
+        XCTAssertEqual(
+            ranges, [NSRange(location: 0, length: 1), NSRange(location: 2, length: 1), NSRange(location: 5, length: 1)],
+            "row 1's fragment clamps to its own line start instead of widening over the previous line's newline"
+        )
+
+        // The hazard is any left edge that lands *inside* the sequence
+        // Foundation reports for the newline, not only column 0: on
+        // "ab\n\u{0301}\u{0302}y" the fragment {4, 1} — column 1 of line 1 —
+        // widens to {2, 3} and also starts on the newline.
+        for source in [source, "ab\n\u{0301}\u{0302}y"] {
+            let index = LineIndex(source)
+            let text = source as NSString
+            for (left, right) in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3), (0, 99), (1, 99)] {
+                let selection = BlockSelection(
+                    anchor: BlockPosition(line: 0, column: left),
+                    head: BlockPosition(line: index.lineCount - 1, column: right)
+                )
+
+                for (line, range) in zip(0..., selection.fragmentRanges(in: index)) {
+                    let start = index.lineStart(line)
+                    let end = start + index.lineLength(line)
+                    let where_ = "\(source.debugDescription) columns \(left)..<\(right) row \(line): \(range)"
+
+                    XCTAssertGreaterThanOrEqual(range.location, start, "\(where_) widened back into the previous line")
+                    XCTAssertLessThanOrEqual(range.location + range.length, end, "\(where_) widened past its line's last unit")
+                    // Scanned over UTF-16 rather than written
+                    // `contains("\n")`, which has no teeth on exactly the
+                    // strings this test produces. Measured: the unfixed
+                    // fragment {1, 2} here substrings to "\n\u{0301}", whose
+                    // *first Character is* "\n" — and yet `contains("\n")`
+                    // (the StringProtocol overload, i.e. `range(of:)`)
+                    // answers false, because Foundation's search follows
+                    // NSString's reckoning, in which that newline is part of
+                    // a composed character sequence. `contains("\n" as
+                    // Character)` and `firstIndex(of:)` both answer true.
+                    XCTAssertFalse(
+                        text.substring(with: range).utf16.contains(0x0A),
+                        "\(where_) covered a line break"
+                    )
+                }
             }
         }
     }
@@ -616,6 +719,8 @@ final class BlockSelectionTests: XCTestCase {
     }
 
     func testBackspaceOnNonEmptyBlockDeletesTheSelection() {
+        // The ordinary case: every row has text inside the block, so no row
+        // is a no-op and the delete paths are exactly "delete the selection".
         let source = "one\ntwo\nthree"
         let index = LineIndex(source)
         let selection = BlockSelection(
@@ -625,6 +730,10 @@ final class BlockSelectionTests: XCTestCase {
 
         let deleteTheSelection = selection.replacementEdits(with: "", in: index)
 
+        XCTAssertTrue(
+            deleteTheSelection.allSatisfy { $0.range.length > 0 },
+            "the fixture's point is that every row genuinely has something to delete — otherwise the equality below is vacuous"
+        )
         XCTAssertEqual(
             selection.backspaceEdits(in: index), deleteTheSelection,
             "with a rectangle selected, Backspace deletes the rectangle — the direction of the key is irrelevant"
@@ -634,6 +743,70 @@ final class BlockSelectionTests: XCTestCase {
             "and so does Forward Delete, identically"
         )
         XCTAssertEqual(apply(selection.backspaceEdits(in: index), to: source), "o\nt\ntee")
+
+        // The limit of that equality, and the subtle part of the file: a row
+        // whose fragment clamped to nothing is dropped from the delete paths
+        // and kept by `replacementEdits`. `Fixture.ragged`'s `bb` row is
+        // shorter than the block's left edge, so the two diverge by one edit.
+        let ragged = LineIndex(Fixture.ragged)
+        let overhangsTheShortRow = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 3),
+            head: BlockPosition(line: 2, column: 8)
+        )
+
+        XCTAssertEqual(
+            overhangsTheShortRow.replacementEdits(with: "", in: ragged).count, 3,
+            "replacementEdits keeps one edit per row, including the row whose fragment clamped to zero length"
+        )
+        XCTAssertEqual(
+            overhangsTheShortRow.backspaceEdits(in: ragged).map(\.range),
+            [NSRange(location: 16, length: 5), NSRange(location: 3, length: 5)],
+            "the short `bb` row contributes no edit at all, so Backspace is *not* identical to replacementEdits here"
+        )
+        XCTAssertEqual(
+            overhangsTheShortRow.forwardDeleteEdits(in: ragged),
+            overhangsTheShortRow.backspaceEdits(in: ragged),
+            "both delete paths filter the same way"
+        )
+    }
+
+    func testDeletingABlockThatOverhangsEveryRowReturnsNoEdits() {
+        // Columns 5..<8 against two 2-unit lines. The block is three columns
+        // wide, so this is the *non-empty* delete path — but every row is
+        // shorter than the block's left edge, so every fragment clamps to a
+        // zero-length range at its row's end. Two edits replacing nothing
+        // with nothing is precisely the empty undo group the no-op rule
+        // exists to prevent: the user presses ⌘Z and nothing visible happens.
+        let source = "ab\ncd"
+        let index = LineIndex(source)
+        let selection = BlockSelection(
+            anchor: BlockPosition(line: 0, column: 5),
+            head: BlockPosition(line: 1, column: 8)
+        )
+
+        XCTAssertFalse(selection.isZeroWidth, "a three-column block takes the non-empty branch, not the caret branch")
+        XCTAssertEqual(
+            selection.fragmentRanges(in: index),
+            [NSRange(location: 2, length: 0), NSRange(location: 5, length: 0)],
+            "clamp-don't-pad leaves every row with a zero-length fragment at its end"
+        )
+
+        XCTAssertEqual(selection.backspaceEdits(in: index), [], "no row has anything to delete, so the whole gesture is empty")
+        XCTAssertEqual(selection.forwardDeleteEdits(in: index), [], "and Forward Delete answers identically")
+
+        // The asymmetry, asserted rather than only commented: only the
+        // *combination* of a zero-length range and an empty replacement is a
+        // no-op, so `replacementEdits` keeps both rows either way — a
+        // zero-length range with a non-empty replacement is the zero-width
+        // insert, which is the whole feature.
+        XCTAssertEqual(
+            selection.replacementEdits(with: "", in: index).count, 2,
+            "replacementEdits is deliberately unfiltered: dropping a row there would lose an edit the caller needs"
+        )
+        XCTAssertEqual(
+            apply(selection.replacementEdits(with: "!", in: index), to: source), "ab!\ncd!",
+            "typing into the same overhanging block still appends to every row"
+        )
     }
 
     func testBackspaceDeletesWholeGraphemeNotOneCodeUnit() {
