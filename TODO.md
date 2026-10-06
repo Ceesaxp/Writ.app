@@ -19,6 +19,7 @@ Outstanding M1 polish items (non-blocking, circle back as the session permits):
 - [x] **PDF export programmatic smoke test** (commit `216edab`) — three HTMLExporter tests: TOC prepended inside content main; every TOC anchor resolves to an HTML id (cross-package slug parity); empty TOC string omits the nav block. Live WKWebView printOperation path remains manual via the smoke checklist.
 - [x] **Strict P0 perf gate measurements** (commit `f62d678`) — docs/04-M1-PERF-GATE.md. 1MB parse p50 192ms, 5MB 953ms, 10KB 2.2ms; all gate criteria PASS with margin.
 - [x] **Undo/redo through `applyEditorText` round-trip** (commit `1076b3c`) — pattern test in WritCoreTests using NSUndoManager + FakeDocument stand-in. App-level test bundle blocked by Xcode 17 + Swift 6 + executable-host swiftmodule conflict; pattern coverage serves as regression lock.
+  - **Unblocked** during the block-selection work: the conflict was the *test host*, not the test bundle. `App/Tests/WritTextViewHarness.swift` drives the production `WritTextView` on a real TextKit 1 stack in an off-screen window, with no run loop and no test host — `insertText`, `deleteBackward`, `copy` and undo all respond synchronously. Any future NSTextView-level regression can now be covered directly.
 
 ---
 
