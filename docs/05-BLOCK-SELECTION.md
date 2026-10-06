@@ -50,6 +50,7 @@ While a block is live:
 | `Tab` | a block insert like any other character — column indent is useful |
 | `Return`, or any insert containing `\n` | **drops the block** to a single caret, then inserts normally |
 | `Backspace` / `Fwd Delete` | one grapheme per row, never crossing a line boundary (§3) |
+| `⌘X` | copies the rectangle, then deletes it through the *delete* path — only that path filters no-op edits, so routing Cut through a plain replacement would register an empty undo group on a block that overhangs every row. On a zero-width block Cut does nothing, matching stock Cut on an empty selection |
 | dead keys / marked text | drops the block, then composes normally |
 | anything else | drops the block, then does its stock thing |
 
@@ -192,11 +193,21 @@ dropping everywhere else:
 
 - **Text changed underneath it** — `NSTextStorage.didProcessEditingNotification`,
   which the view already observes for the front-matter cache. Undo, Find &
-  Replace, `setSource`, the syntax highlighter and anything else all arrive
-  here. Guarded by a flag so the block's *own* edits do not drop it.
-- **Selection changed from outside** — the `setSelectedRange(s)` overrides,
-  guarded by the same kind of flag so the view's own display refresh does not
-  drop it. A plain click, ⌘F and any programmatic selection all pass through.
+  Replace and `setSource` all arrive here. Guarded by a flag so the block's
+  *own* edits do not drop it, and **filtered on `.editedCharacters`**: the
+  syntax highlighter re-styles the document as a separate attribute-only pass
+  ~80 ms after every edit, so dropping on attribute edits would make the
+  rectangle silently vanish a moment after each keystroke. Attributes cannot
+  invalidate a line/column coordinate, which is the whole reason this choke
+  point exists. (`editedMask` is measured as `2` for a character edit and `1`
+  for an attribute-only one.)
+- **Selection changed from outside** — the `setSelectedRange(s)` overrides.
+  A plain click, ⌘F and any programmatic selection pass through here, and so
+  does the plain `selectedRanges =` setter. **Both** flags must exempt it, not
+  just the display-refresh one: `NSTextStorage.replaceCharacters` makes AppKit
+  re-set the selection around the edited range, and that arrives at this
+  override indistinguishably from an external change. Exempting only the
+  display refresh drops the block on every one of its own edits.
 
 `doCommand(by:)` handles the block selectors explicitly and **drops the block
 in its default case**, so an unhandled command can never leave the block and
