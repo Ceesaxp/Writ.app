@@ -49,7 +49,7 @@ While a block is live:
 | any printable text | replaces every row's fragment; a zero-width block inserts at N carets |
 | `Tab` | a block insert like any other character — column indent is useful |
 | `Return`, or any insert containing `\n` | **drops the block** to a single caret, then inserts normally |
-| `Backspace` / `Fwd Delete` | one grapheme per row, never crossing a line boundary (§6) |
+| `Backspace` / `Fwd Delete` | one grapheme per row, never crossing a line boundary (§3) |
 | dead keys / marked text | drops the block, then composes normally |
 | anything else | drops the block, then does its stock thing |
 
@@ -78,6 +78,14 @@ ordinary text. Tabs and wide glyphs (CJK, emoji) break that equivalence: the
 selection stays *character*-consistent and will look geometrically ragged on
 such lines. That is the honest trade for a model that is testable without a
 layout manager.
+
+**Deletes never cross a line boundary.** Backspace and forward-delete take
+one grapheme per row. A caret at column 0 contributes no edit at all rather
+than joining the line above: the ordinary single-caret behaviour there is a
+join, but a rectangle is *defined over* its rows, and joining would dissolve
+them. A row that contributes nothing is absent from the edit list rather
+than present as a no-op, so a gesture that affects no row registers no undo
+group for the user to press ⌘Z through.
 
 **Clamp, do not pad.** A line shorter than the block's left edge gets a
 zero-length fragment at its end. Typing into an overhanging rectangle
@@ -157,10 +165,14 @@ it can be unit-tested in the hostless `WritTests` bundle:
 
 - `fragmentRanges(in:)` — one `NSRange` per row, ascending, never spanning a
   newline, zero-length where the row is short or the block is zero-width.
-  Non-empty rows snap **outward** to whole composed character sequences, so
-  a rectangle edge never splits a surrogate pair or a combining sequence
-  into invalid UTF-16. Zero-length rows are exempt: inflating a caret to
-  the grapheme it sits in would turn "insert here" into "replace this".
+  Every row's range is kept off grapheme interiors, because a rectangle
+  edge that splits a surrogate pair makes `replaceCharacters` write invalid
+  UTF-16 into the document. Non-empty rows snap **outward** to whole
+  composed character sequences. A zero-length row keeps length 0 — widening
+  a caret would turn "insert here" into "replace this" — but its *location*
+  snaps back to the start of the grapheme it sits in. Both clamp to the
+  row's own line, because Foundation joins a `\n` to a combining mark that
+  follows it, so an unclamped snap at column 0 reaches onto the line above.
 - `copyString(in:)` — `\n`-joined fragments.
 - `replacementEdits(with:in:)` — replace every fragment; sorted **descending**
   by location so applying them in order keeps later offsets valid.
