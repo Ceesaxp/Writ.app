@@ -496,3 +496,30 @@ The headline minor-version bump. Closes the last two issues on the
       Verified: 20 consecutive switches across every Source/Split/Preview
       combination leave the frame byte-identical. The outline sidebar
       still grows the window by its own width, which is intended.
+
+---
+
+## Block (rectangular) selection — code complete, awaiting manual pass
+
+BBEdit/Zed-style column selection: ⌥-drag, or ⌥⇧↑/↓ to start a block and
+⌥⇧←/→ to widen a live one. Design and measured AppKit behaviour in
+`docs/05-BLOCK-SELECTION.md`; **the manual checklist is §8 there**.
+
+Branch `feat/block-selection`. 113 tests (57 new), app builds without
+warnings.
+
+- [x] Pure model — `BlockSelection`, `LineIndex`, `BlockEdit`; fragments,
+      copy string, replacement/paste/backspace/forward-delete edit plans
+- [x] Grapheme safety — edges snap outward to whole composed character
+      sequences, carets snap to the grapheme start, both clamped to their
+      own line (Foundation joins a `\n` to a combining mark that follows it)
+- [x] Headless NSTextView harness — `App/Tests/WritTextViewHarness.swift`.
+      This is what the M1 item above recorded as blocked; the blocker was
+      the test *host*, not the bundle
+- [x] View state, edit interception, drop rules at the two choke points
+- [x] Keyboard path + hit-testing
+- [x] ⌥-drag tracking loop + carets for the rows AppKit won't draw
+- [ ] **Manual pass against `docs/05-BLOCK-SELECTION.md` §8** — the drag
+      loop and the caret drawing have no automated cover
+- [ ] ⌥-double-click collapses to a caret instead of selecting a word
+      (known rough edge, §7)
