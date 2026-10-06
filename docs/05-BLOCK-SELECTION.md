@@ -142,7 +142,11 @@ it can be unit-tested in the hostless `WritTests` bundle:
 
 - `fragmentRanges(in:)` — one `NSRange` per row, ascending, never spanning a
   newline, zero-length where the row is short or the block is zero-width.
-- `copyString(from:index:)` — `\n`-joined fragments.
+  Non-empty rows snap **outward** to whole composed character sequences, so
+  a rectangle edge never splits a surrogate pair or a combining sequence
+  into invalid UTF-16. Zero-length rows are exempt: inflating a caret to
+  the grapheme it sits in would turn "insert here" into "replace this".
+- `copyString(in:)` — `\n`-joined fragments.
 - `replacementEdits(with:in:)` — replace every fragment; sorted **descending**
   by location so applying them in order keeps later offsets valid.
 - `pasteEdits(clipboard:in:)` — distribution rules in §6.
