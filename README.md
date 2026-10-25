@@ -113,6 +113,20 @@ The editor uses AppKit `NSTextView`/TextKit. The preview uses a persistent `WKWe
 
 The app is designed to work offline and does not require an account. MVP builds do not use telemetry or remote rendering services.
 
+## Install
+
+```sh
+brew install --cask ceesaxp/tap/writ
+```
+
+Or download the signed, notarized DMG from
+[the releases page](https://github.com/Ceesaxp/Writ.app/releases/latest).
+
+The Homebrew cask lives in the
+[ceesaxp/homebrew-tap](https://github.com/ceesaxp/homebrew-tap) repository,
+not in this one — that is the copy `brew` reads, and the only one a release
+needs to update.
+
 ## Build
 
 Open the existing project:
