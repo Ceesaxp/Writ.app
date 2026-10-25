@@ -639,20 +639,35 @@ final class PreviewViewController: NSViewController {
         evaluateExportJS(js)
     }
 
-    /// Injects a `@media print { html { font-size: <pct>% } }` style tag
-    /// so the WKWebView print path scales body + heading rhythm down to
-    /// the user's PDF density preference. `html` is the right scope:
-    /// headings sized in `rem` follow the root, and `em`-based child
-    /// rules cascade from `body`.
+    /// Injects a `@media print { :root { --writ-font-scale: <factor> } }`
+    /// style tag so the WKWebView print path scales the preview down to the
+    /// user's PDF density preference.
+    ///
+    /// The scale *variable* is the right scope, not `html`'s `font-size`.
+    /// `theme.css` derives the size of both `html` and `body` from
+    /// `--writ-base-font-size` times `--writ-font-scale`, so this single
+    /// `:root` declaration moves body copy, `rem` headings, `em`-based
+    /// children, code and tables together. Overriding `html` alone did not:
+    /// `body` carried its own absolute size, so body text never inherited
+    /// the override and only the headings scaled. Themes override only
+    /// `--writ-base-font-size`, so there is no specificity fight here, and
+    /// the element is appended last in `<head>` — after the theme stylesheet
+    /// and the user's custom CSS — so it also wins on document order.
     private func insertPDFExportFontScale(_ percent: Int, completion: @escaping () -> Void) {
-        let clamped = min(100, max(60, percent))
+        let clamped = min(100, max(50, percent))
+        // Two fixed decimals via the unlocalized `String(format:)` — never a
+        // locale-aware formatter. A decimal comma here would not fail to
+        // parse (custom properties accept almost any token), it would make
+        // the `calc()` invalid at use time and silently fall the size back
+        // to the initial 16px — i.e. larger than the screen, not smaller.
+        let factor = String(format: "%.2f", Double(clamped) / 100)
         let js = """
             (function(){
               var prior = document.getElementById('writ-export-font-scale');
               if (prior && prior.parentNode) prior.parentNode.removeChild(prior);
               var style = document.createElement('style');
               style.id = 'writ-export-font-scale';
-              style.textContent = '@media print { html { font-size: \(clamped)% } }';
+              style.textContent = '@media print { :root { --writ-font-scale: \(factor) } }';
               document.head.appendChild(style);
             })()
             """

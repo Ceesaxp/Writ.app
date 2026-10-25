@@ -47,10 +47,10 @@ enum ExportService {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: pdfPaperSizeDefaultsKey) }
     }
 
-    /// PDF font scale (% of HTML base). Screen preview is sized for
-    /// reading on a Mac; on paper that density reads loose, so the
-    /// default trims it to 85%. Clamp to [60, 100]; 100 means "same as
-    /// preview, skip the print stylesheet entirely".
+    /// PDF font scale (% of the active theme's base font size). Screen
+    /// preview is sized for reading on a Mac; on paper that density reads
+    /// loose, so the default trims it to 85%. Clamp to [50, 100]; 100 means
+    /// "same as preview, skip the print stylesheet entirely".
     static let pdfFontScalePercentDefaultsKey = "WritPDFFontScalePercent"
     static let pdfFontScalePercentDefault = 85
     static var pdfFontScalePercent: Int {
@@ -58,10 +58,10 @@ enum ExportService {
             guard let stored = UserDefaults.standard.object(forKey: pdfFontScalePercentDefaultsKey) as? Int else {
                 return pdfFontScalePercentDefault
             }
-            return min(100, max(60, stored))
+            return min(100, max(50, stored))
         }
         set {
-            let clamped = min(100, max(60, newValue))
+            let clamped = min(100, max(50, newValue))
             UserDefaults.standard.set(clamped, forKey: pdfFontScalePercentDefaultsKey)
         }
     }
