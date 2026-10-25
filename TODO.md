@@ -503,7 +503,7 @@ The headline minor-version bump. Closes the last two issues on the
 
 BBEdit/Zed-style column selection: ⌥-drag, or ⌥⇧↑/↓ to start a block and
 ⌥⇧←/→ to widen a live one. Design and measured AppKit behaviour in
-`docs/05-BLOCK-SELECTION.md`; **the manual checklist is §8 there**.
+`docs/06-BLOCK-SELECTION.md`; **the manual checklist is §8 there**.
 
 Branch `feat/block-selection`. 113 tests (57 new), app builds without
 warnings.
@@ -519,7 +519,7 @@ warnings.
 - [x] View state, edit interception, drop rules at the two choke points
 - [x] Keyboard path + hit-testing
 - [x] ⌥-drag tracking loop + carets for the rows AppKit won't draw
-- [ ] **Manual pass against `docs/05-BLOCK-SELECTION.md` §8** — the drag
+- [ ] **Manual pass against `docs/06-BLOCK-SELECTION.md` §8** — the drag
       loop and the caret drawing have no automated cover
 - [ ] ⌥-double-click collapses to a caret instead of selecting a word
       (known rough edge, §7)

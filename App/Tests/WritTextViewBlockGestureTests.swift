@@ -3,7 +3,7 @@ import XCTest
 
 /// The *input* half of rectangular selection: hit-testing a point to a
 /// `BlockPosition`, and the `doCommand(by:)` key routing that starts, grows
-/// and drops a block (docs/05-BLOCK-SELECTION.md §2).
+/// and drops a block (docs/06-BLOCK-SELECTION.md §2).
 ///
 /// **The keyboard is driven through `doCommand(by:)` only.** Neither
 /// `mouseDown(with:)` nor `interpretKeyEvents(_:)` is safe here:

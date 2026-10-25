@@ -91,7 +91,7 @@ final class WritTextView: NSTextView {
         if blockSelection != nil {
             // Any newline would insert N line breaks and dissolve the very
             // rows the rectangle is defined over, so it drops to a single
-            // caret and then inserts normally (docs/05-BLOCK-SELECTION.md §2).
+            // caret and then inserts normally (docs/06-BLOCK-SELECTION.md §2).
             // Tested over `Character.isNewline` rather than `"\n"` so a
             // `\r\n` or U+2028 arriving from an input method drops too.
             if typed.contains(where: \.isNewline) {
@@ -296,7 +296,7 @@ final class WritTextView: NSTextView {
     /// `[{0,0}, {6,0}, {9,0}]` as `[{0,0}]`. The empty fragments a rectangle
     /// produces — a short row it overhangs, or every row of a zero-width
     /// block — are exactly the ones AppKit discards
-    /// (docs/05-BLOCK-SELECTION.md §4). `selectedRanges` is therefore a
+    /// (docs/06-BLOCK-SELECTION.md §4). `selectedRanges` is therefore a
     /// rendering channel only; see `refreshBlockSelectionDisplay()`.
     private(set) var blockSelection: BlockSelection?
 
