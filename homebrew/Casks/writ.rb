@@ -6,7 +6,7 @@ cask "writ" do
       verified: "github.com/Ceesaxp/Writ.app/"
   name "Writ"
   desc "Markdown editor for technical writing"
-  homepage "https://github.com/Ceesaxp/Writ.app"
+  homepage "https://ceesaxp.github.io/writ/"
 
   livecheck do
     url :url
