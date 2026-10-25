@@ -39,43 +39,43 @@
   }
 }
 
-html[data-writ-theme="mono"] { --writ-base-font-size: 13.5px; }
+html[data-writ-preview-theme="mono"] { --writ-base-font-size: 13.5px; }
 
-html[data-writ-theme="mono"] #writ-content {
+html[data-writ-preview-theme="mono"] #writ-content {
   margin: 1.4rem auto 3rem;
   padding: 0 1.5rem;
 }
 
 /* Headings use the same family — only weight + a leading hash for
    that man-page heading vibe. */
-html[data-writ-theme="mono"] h1,
-html[data-writ-theme="mono"] h2,
-html[data-writ-theme="mono"] h3,
-html[data-writ-theme="mono"] h4,
-html[data-writ-theme="mono"] h5,
-html[data-writ-theme="mono"] h6 {
+html[data-writ-preview-theme="mono"] h1,
+html[data-writ-preview-theme="mono"] h2,
+html[data-writ-preview-theme="mono"] h3,
+html[data-writ-preview-theme="mono"] h4,
+html[data-writ-preview-theme="mono"] h5,
+html[data-writ-preview-theme="mono"] h6 {
   font-weight: 700;
   letter-spacing: 0;
   margin-top: 1.4em;
   margin-bottom: 0.4em;
 }
 
-html[data-writ-theme="mono"] h1 { font-size: 1.6rem; border-bottom: 1px dashed var(--writ-border); }
-html[data-writ-theme="mono"] h2 { font-size: 1.3rem; border-bottom: 1px dashed var(--writ-border); }
-html[data-writ-theme="mono"] h3 { font-size: 1.15rem; }
-html[data-writ-theme="mono"] h4,
-html[data-writ-theme="mono"] h5,
-html[data-writ-theme="mono"] h6 { font-size: 1.0rem; }
+html[data-writ-preview-theme="mono"] h1 { font-size: 1.6rem; border-bottom: 1px dashed var(--writ-border); }
+html[data-writ-preview-theme="mono"] h2 { font-size: 1.3rem; border-bottom: 1px dashed var(--writ-border); }
+html[data-writ-preview-theme="mono"] h3 { font-size: 1.15rem; }
+html[data-writ-preview-theme="mono"] h4,
+html[data-writ-preview-theme="mono"] h5,
+html[data-writ-preview-theme="mono"] h6 { font-size: 1.0rem; }
 
-html[data-writ-theme="mono"] blockquote {
+html[data-writ-preview-theme="mono"] blockquote {
   border-left-style: dashed;
 }
 
-html[data-writ-theme="mono"] hr {
+html[data-writ-preview-theme="mono"] hr {
   border-top: 1px dashed var(--writ-border);
 }
 
-html[data-writ-theme="mono"] code,
-html[data-writ-theme="mono"] pre {
+html[data-writ-preview-theme="mono"] code,
+html[data-writ-preview-theme="mono"] pre {
   font-family: var(--writ-mono-font);
 }

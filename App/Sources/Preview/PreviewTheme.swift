@@ -6,7 +6,10 @@ import Foundation
 /// the other three are curated alternates.
 ///
 /// The Swift name is the lowercase identifier; the JS bridge accepts
-/// the same string in `window.Writ.setTheme(name)`.
+/// the same string in `window.Writ.setPreviewTheme(name)`, which swaps
+/// the `#writ-theme` stylesheet link and stamps
+/// `data-writ-preview-theme` on the document root. (`setTheme` is the
+/// unrelated legacy colour-scheme hint — `auto` / `light` / `dark`.)
 enum PreviewTheme: String, CaseIterable, Sendable {
     case github
     case serif

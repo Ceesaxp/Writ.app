@@ -5,19 +5,20 @@ import WritParser
 /// unit-tested without an AppKit harness; the app target wraps this with
 /// disk I/O and Save panel plumbing.
 public enum HTMLExporter {
-    public static func render(parsed: ParsedDocument?, theme: String, css: String, toc: String = "") -> String {
+    public static func render(parsed: ParsedDocument?, theme: String, previewTheme: String = "github", css: String, toc: String = "") -> String {
         let body = parsed?.html ?? "<!-- no rendered document available -->"
         // Use front-matter `title` if present so the exported file's
         // browser tab / OS preview shows the document name rather
         // than the generic "Writ Export" placeholder.
         let title = parsed?.frontMatter?["title"] ?? "Writ Export"
         let header = DocumentHeaderBuilder.render(frontMatter: parsed?.frontMatter)
-        return render(body: body, theme: theme, css: css, toc: toc, title: title, docHeader: header?.html ?? "", tags: header?.tags ?? [])
+        return render(body: body, theme: theme, previewTheme: previewTheme, css: css, toc: toc, title: title, docHeader: header?.html ?? "", tags: header?.tags ?? [])
     }
 
     public static func render(
         body: String,
         theme: String,
+        previewTheme: String = "github",
         css: String,
         toc: String = "",
         title: String = "Writ Export",
@@ -26,9 +27,16 @@ public enum HTMLExporter {
     ) -> String {
         let escapedTitle = escapeHTML(title)
         let keywordsMeta = tags.isEmpty ? "" : "\n<meta name=\"keywords\" content=\"\(escapeHTML(tags.joined(separator: ", ")))\">"
+        // Every rule in the inlined preview-theme overlay is scoped to
+        // `html[data-writ-preview-theme="<name>"]`, matching what
+        // `writ.js`'s `setPreviewTheme` stamps on the live preview. Callers
+        // pass a `PreviewTheme.rawValue`, so this is always one of four safe
+        // literals; escaped anyway so it can never break out of the
+        // attribute if that ever stops being true.
+        let escapedPreviewTheme = escapeHTML(previewTheme)
         return """
         <!DOCTYPE html>
-        <html lang="en">
+        <html lang="en" data-writ-preview-theme="\(escapedPreviewTheme)">
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">

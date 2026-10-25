@@ -83,6 +83,12 @@ enum ExportService {
             + "\n" + katexCSS()
             + "\n" + highlightCSS()
             + "\n" + tocCSS()
+        // The overlay inlined above scopes every rule to
+        // `html[data-writ-preview-theme="<name>"]`, so the exported root
+        // element has to carry the same name or the overlay matches nothing.
+        // Read on the main actor here (not inside the capture callback);
+        // a `PreviewTheme.rawValue` is always one of four safe literals.
+        let previewTheme = PreviewAppearance.theme.rawValue
         let toc = includeTOC ? TOCBuilder.render(from: source) : ""
         let header = DocumentHeaderBuilder.render(frontMatter: parsed?.frontMatter)
         let title = parsed?.frontMatter?["title"] ?? "Writ Export"
@@ -92,6 +98,7 @@ enum ExportService {
                 html = HTMLExporter.render(
                     body: captured,
                     theme: theme,
+                    previewTheme: previewTheme,
                     css: css,
                     toc: toc,
                     title: title,
@@ -99,7 +106,7 @@ enum ExportService {
                     tags: header?.tags ?? []
                 )
             } else {
-                html = HTMLExporter.render(parsed: parsed, theme: theme, css: css, toc: toc)
+                html = HTMLExporter.render(parsed: parsed, theme: theme, previewTheme: previewTheme, css: css, toc: toc)
             }
             do {
                 try Data(html.utf8).write(to: url, options: .atomic)
