@@ -1,6 +1,6 @@
 cask "writ" do
-  version "0.5.6"
-  sha256 "ca72892926f751a60381e2dfb597bdf0ab643d2de62d733c67afa891df472c53"
+  version "0.6.0"
+  sha256 "d83008b1d4c8b39a21f53928f693b9e654b0db7c4f5c12c7c5175cca78388fb5"
 
   url "https://github.com/Ceesaxp/Writ.app/releases/download/v#{version}/Writ-#{version}.dmg",
       verified: "github.com/Ceesaxp/Writ.app/"
