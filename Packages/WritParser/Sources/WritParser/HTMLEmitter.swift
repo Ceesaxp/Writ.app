@@ -47,7 +47,7 @@ struct HTMLEmitter: MarkupWalker {
         out.append("<dt class=\"writ-front-matter-format\">\(formatLabel) front matter</dt>\n")
         out.append("<dd>\n<table>\n")
         for entry in fm.entries {
-            out.append("<tr><th>\(escape(entry.key))</th><td>\(escape(entry.value))</td></tr>\n")
+            out.append("<tr><th>\(Self.escape(entry.key))</th><td>\(Self.escape(entry.value))</td></tr>\n")
         }
         out.append("</table>\n</dd>\n</dl>\n")
     }
@@ -93,15 +93,15 @@ struct HTMLEmitter: MarkupWalker {
                 collectedBlocks.append(TechnicalBlock(id: blockID, kind: .plantuml, source: code.code))
                 out.append("<div data-writ-id=\"\(id)\"\(lineAttr) data-writ-block=\"\(blockID)\" class=\"writ-plantuml\">")
                 out.append("<div class=\"writ-plantuml-notice\">PlantUML rendering is not configured</div>")
-                out.append("<pre><code>\(escape(code.code))</code></pre>")
+                out.append("<pre><code>\(Self.escape(code.code))</code></pre>")
                 out.append("</div>\n")
             } else if language == "math" {
                 let blockID = "MATH_FENCED_\(blockCounter - 1)"
                 collectedBlocks.append(TechnicalBlock(id: blockID, kind: .math, source: code.code))
                 out.append("<div data-writ-id=\"\(id)\"\(lineAttr) data-writ-block=\"\(blockID)\" class=\"writ-math-block\"></div>\n")
             } else {
-                let langClass = language.isEmpty ? "" : " class=\"language-\(escape(language))\""
-                out.append("<pre data-writ-id=\"\(id)\"\(lineAttr)><code\(langClass)>\(escape(code.code))</code></pre>\n")
+                let langClass = language.isEmpty ? "" : " class=\"language-\(Self.escape(language))\""
+                out.append("<pre data-writ-id=\"\(id)\"\(lineAttr)><code\(langClass)>\(Self.escape(code.code))</code></pre>\n")
             }
         case let html as HTMLBlock:
             let id = nextBlockID("html")
@@ -238,7 +238,7 @@ struct HTMLEmitter: MarkupWalker {
                 text: text.string,
                 allowAutolink: !insideLink,
                 into: &out,
-                escape: escape
+                escape: Self.escape
             )
         case let em as Emphasis:
             out.append("<em>")
@@ -253,9 +253,9 @@ struct HTMLEmitter: MarkupWalker {
             for child in strike.children { emitInline(child) }
             out.append("</del>")
         case let code as InlineCode:
-            out.append("<code>\(escape(code.code))</code>")
+            out.append("<code>\(Self.escape(code.code))</code>")
         case let link as Link:
-            let dest = escape(link.destination ?? "")
+            let dest = Self.escape(link.destination ?? "")
             out.append("<a href=\"\(dest)\">")
             let priorInsideLink = insideLink
             insideLink = true
@@ -263,9 +263,9 @@ struct HTMLEmitter: MarkupWalker {
             insideLink = priorInsideLink
             out.append("</a>")
         case let image as Image:
-            let src = escape(image.source ?? "")
+            let src = Self.escape(image.source ?? "")
             let alt = image.plainText
-            out.append("<img src=\"\(src)\" alt=\"\(escape(alt))\">")
+            out.append("<img src=\"\(src)\" alt=\"\(Self.escape(alt))\">")
         case let html as InlineHTML:
             out.append(HTMLSanitizer.sanitize(html.rawHTML))
         case is LineBreak:
@@ -277,7 +277,7 @@ struct HTMLEmitter: MarkupWalker {
         }
     }
 
-    private func escape(_ s: String) -> String {
+    private static func escape(_ s: String) -> String {
         var out = ""
         out.reserveCapacity(s.count)
         for ch in s {

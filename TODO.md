@@ -600,27 +600,49 @@ Found by reading `docs/01-MVP-PLAN.md` back against the code rather than
 against this file. Implementation is essentially complete against the plan;
 these are gaps in **evidence**, plus one measured regression.
 
-- [ ] **Parse path is 3–6× slower than the recorded P0 gate.** Measured, and
-      isolated against both the host OS and the `swift-markdown` version —
-      it is Writ's own code. Same-library comparison vs `f62d678`:
-      10 KB 2.9×, 1 MB 3.5× (157 → 555 ms), 5 MB 6.1× (795 ms → 4 872 ms).
-      Full matrix and method in `docs/04-M1-PERF-GATE.md`. The shape is
-      diagnostic: cost scales with document **size** and is flat against
-      block **density** (`code-heavy` and `mermaid-heavy` both 1.09×), and
-      cost per byte roughly doubles from 1 MB to 5 MB — so it is
-      super-linear per-line or per-character work. `data-writ-line` is ruled
-      out by inspection. **Bisected to `fc438ca`** ("feat: emoji shortcodes
-      + autolink bare URLs", v0.4.11) — one commit accounts for the whole
-      regression; everything after it is flat.
-      Cause: `AutolinkExtractor.findNextStart` probes every character
-      position for each candidate scheme via a `startsWith` helper that
-      bridges the needle to `NSString`, allocates a substring, and calls
-      `lowercased()` on both sides — ~3 M calls and ~12 M String
-      allocations for a 1 MB document, which in `1mb.md` find **zero**
-      URLs. Secondary: `EmojiShortcodes.substitute` rebuilds the whole
-      string via `Character` iteration whenever a `:` appears anywhere.
-      Fix shape and the measurement matrix are in
-      `docs/04-M1-PERF-GATE.md`. **Not yet fixed.**
+- [x] **Parse path was 3–6× slower than the recorded P0 gate — fixed
+      2026-10-25.** Isolated against both the host OS and the
+      `swift-markdown` version first (it was neither), then **bisected to
+      `fc438ca`** ("feat: emoji shortcodes + autolink bare URLs", v0.4.11)
+      over 82 commits, measuring `1mb.md` p50 with the dependency pinned at
+      every step. That one commit accounted for the whole regression.
+      It had **two** independent causes, not one:
+      1. `AutolinkExtractor.findNextStart` probed every character position
+         for each candidate scheme through a `startsWith` helper that
+         bridged to `NSString`, allocated a substring and called
+         `lowercased()` on both sides — ~3 M calls and ~12 M String
+         allocations per 1 MB, finding **zero** URLs in `1mb.md`. Rewritten
+         to scan one UTF-16 buffer with a first-code-unit cheap-reject and
+         integer compares against pre-lowercased needles.
+      2. The emitter's `Text` case began passing `escape` — an *instance*
+         method of the `HTMLEmitter` **struct** — as a closure argument
+         alongside `into: &out`. The partial application captured a copy of
+         `self`, so `out`'s buffer stopped being uniquely referenced and
+         every append deep-copied the whole accumulated HTML: one copy per
+         inline `Text` node, **O(n²)**. `escape` reads no instance state;
+         making it `static` removed the capture. This was the super-linear
+         term the measurement shape had pointed at.
+      Result, same-session three-way measurement: 1 MB **561.7 → 180.4 ms**
+      (3.11×), 5 MB **4 848 → 905 ms** (5.35×), and `5mb/1mb` back to
+      5.02× from 8.8× — linear again, matching the 4.99× measured before
+      either feature existed. HTML output byte-identical for every fixture,
+      73 parser tests green, zero warnings. **All three P0 gate criteria
+      pass again.** Full matrix, method and the two mechanisms in
+      `docs/04-M1-PERF-GATE.md`.
+- [ ] **`EmojiShortcodes.substitute` costs ~20 ms per 1 MB — feature cost,
+      not a regression.** It has a `guard text.contains(":")` fast path but
+      then rebuilds the string `Character` by `Character` whenever *any*
+      colon is present, and `1mb.md` has 403. A probe measures it at
+      ~22.6 ms of the now-180 ms parse (the rewritten autolink scan is
+      ~3.8 ms). Returning early unless a table lookup actually hits would
+      recover most of it and bring 1 MB back to the ~158 ms measured before
+      the feature existed. Low priority — the gate passes with > 800 ms of
+      headroom.
+- [ ] **`InlineTextTransform.swift` has a pre-existing logic bug** —
+      `if !url.contains("."), url.count < 4 { … }` uses a comma (AND)
+      where its own comment describes an `||`. Left untouched during the
+      perf work because fixing it is a behavioural change. Needs a test
+      that pins what the intended behaviour actually is first.
 - [ ] **`math-heavy` is ~12× its M0 number and unexplained** — ~8.5 ms at
       M0, ~80 ms when the gate doc was written, ~105 ms now. It measures
       the same at `cae9d46`, `fc438ca` and `master`, so it is **not** the

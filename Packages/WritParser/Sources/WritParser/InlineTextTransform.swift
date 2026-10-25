@@ -63,30 +63,40 @@ enum AutolinkExtractor {
         let href: String
     }
 
+    // Scheme prefixes we look for, pre-lowercased as UTF-16 code
+    // units so the scan never has to allocate a String to compare.
+    private static let httpsScheme: [unichar] = [0x68, 0x74, 0x74, 0x70, 0x73, 0x3A, 0x2F, 0x2F]  // "https://"
+    private static let httpScheme: [unichar] = [0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F]          // "http://"
+    private static let wwwHost: [unichar] = [0x77, 0x77, 0x77, 0x2E]                               // "www."
+
     /// Scan `text` for autolinkable URL spans. Returns matches in left-
     /// to-right order, non-overlapping. Skips URLs already wrapped in
     /// angle brackets (`<https://…>`) — those are CommonMark's own
     /// autolinks which the parser has already handled.
+    ///
+    /// The whole scan runs over one UTF-16 buffer taken from `text`
+    /// up front: text nodes are line-sized, so that is a single small
+    /// allocation, and every probe below is an integer compare.
     static func scan(_ text: String) -> [Match] {
-        let ns = text as NSString
+        let units = Array(text.utf16)
+        let length = units.count
         var results: [Match] = []
         var cursor = 0
-        while cursor < ns.length {
-            guard let startInfo = findNextStart(ns, from: cursor) else { break }
+        while cursor < length {
+            guard let startInfo = findNextStart(units, from: cursor) else { break }
             let urlStart = startInfo.start
             let isWWW = startInfo.isWWW
 
             // Walk forward as long as characters look URL-shaped.
             var end = urlStart
-            while end < ns.length {
-                let c = ns.character(at: end)
-                if isURLChar(c) {
+            while end < length {
+                if isURLChar(units[end]) {
                     end += 1
                 } else {
                     break
                 }
             }
-            var url = ns.substring(with: NSRange(location: urlStart, length: end - urlStart))
+            var url = String(decoding: units[urlStart..<end], as: UTF16.self)
 
             // Need a `.` somewhere after the scheme/host start for it
             // to be a plausible URL.
@@ -125,38 +135,59 @@ enum AutolinkExtractor {
 
     /// Returns the location of the next URL candidate start, or nil.
     /// Skips matches already wrapped in `<…>` (CommonMark autolinks).
-    private static func findNextStart(_ ns: NSString, from: Int) -> (start: Int, isWWW: Bool)? {
+    private static func findNextStart(_ units: [unichar], from: Int) -> (start: Int, isWWW: Bool)? {
         var i = from
-        while i < ns.length {
-            // Case-insensitive substring matches starting at `i`.
-            if startsWith(ns, at: i, "https://") || startsWith(ns, at: i, "http://") {
-                // Reject if immediately preceded by `<` (already a
-                // CommonMark autolink) or by a URL character (already
-                // mid-token).
-                if !precededByExcluded(ns, at: i) {
-                    return (i, false)
+        let length = units.count
+        while i < length {
+            // Only `h` and `w` can begin a candidate, so reject on the
+            // first code unit before probing a whole prefix. This is
+            // what keeps the scan near-free on prose with no URLs.
+            switch units[i] {
+            case 0x68, 0x48:  // h H
+                if startsWith(units, at: i, httpsScheme) || startsWith(units, at: i, httpScheme) {
+                    // Reject if immediately preceded by `<` (already a
+                    // CommonMark autolink) or by a URL character
+                    // (already mid-token).
+                    if !precededByExcluded(units, at: i) {
+                        return (i, false)
+                    }
                 }
-            }
-            if startsWith(ns, at: i, "www.") {
-                if !precededByExcluded(ns, at: i) {
-                    return (i, true)
+            case 0x77, 0x57:  // w W
+                if startsWith(units, at: i, wwwHost) {
+                    if !precededByExcluded(units, at: i) {
+                        return (i, true)
+                    }
                 }
+            default:
+                break
             }
             i += 1
         }
         return nil
     }
 
-    private static func startsWith(_ ns: NSString, at index: Int, _ needle: String) -> Bool {
-        let n = (needle as NSString).length
-        guard index + n <= ns.length else { return false }
-        let slice = ns.substring(with: NSRange(location: index, length: n))
-        return slice.lowercased() == needle.lowercased()
+    /// Case-insensitive prefix compare against an already-lowercase
+    /// needle. Folding is ASCII-only, which loses nothing here: no
+    /// non-ASCII code point lowercases to `h`, `t`, `p`, `s` or `w`.
+    @inline(__always)
+    private static func startsWith(_ units: [unichar], at index: Int, _ needle: [unichar]) -> Bool {
+        let n = needle.count
+        guard index + n <= units.count else { return false }
+        for k in 0..<n {
+            if asciiLowercased(units[index + k]) != needle[k] { return false }
+        }
+        return true
     }
 
-    private static func precededByExcluded(_ ns: NSString, at index: Int) -> Bool {
+    @inline(__always)
+    private static func asciiLowercased(_ c: unichar) -> unichar {
+        (0x41...0x5A).contains(c) ? c | 0x20 : c  // A-Z
+    }
+
+    @inline(__always)
+    private static func precededByExcluded(_ units: [unichar], at index: Int) -> Bool {
         guard index > 0 else { return false }
-        let prev = ns.character(at: index - 1)
+        let prev = units[index - 1]
         // `<` means we're inside a CommonMark autolink — leave alone.
         if prev == 0x3C { return true }  // '<'
         // Word-continuation character means we're inside another
@@ -164,6 +195,7 @@ enum AutolinkExtractor {
         return isURLChar(prev) && prev != 0x20
     }
 
+    @inline(__always)
     private static func isURLChar(_ c: unichar) -> Bool {
         // ASCII letters, digits, and URL-safe punctuation. Avoid
         // breaking on Unicode — bare URLs are ASCII-only in practice.
