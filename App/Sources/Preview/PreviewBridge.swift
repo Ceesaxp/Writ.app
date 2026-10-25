@@ -40,6 +40,15 @@ final class PreviewBridge {
     /// `rendererVersion` the cache entries from the old server are left
     /// behind rather than served.
     private var plantUMLResolverEndpoint: String?
+    /// The source the newest render pass was asked for, kept so an endpoint
+    /// change can re-run that pass without the document having to be edited.
+    /// This is the same string instance `WritDocument.sourceText` already
+    /// holds, so it is a retain, not a copy.
+    private var lastSource: String?
+    /// Token for the `PlantUMLSettings.didChange` subscription, released in
+    /// `deinit`. `nonisolated(unsafe)` only so that the nonisolated `deinit`
+    /// may read it: it is written once, during `init`, and never again.
+    nonisolated(unsafe) private var plantUMLSettingsObserver: (any NSObjectProtocol)?
 
     /// Directory of the document on disk, used so relative image references
     /// resolve from the preview's perspective. Updated when the document
@@ -49,11 +58,50 @@ final class PreviewBridge {
     init(parser: any MarkdownParser) {
         let mode = LargeDocumentMode(thresholds: .fromDefaults())
         self.scheduler = PreviewScheduler(parser: parser, largeMode: mode)
+        // Configuring (or clearing) the endpoint has to take effect on the
+        // document that is already open, the same way a preview-theme change
+        // does — otherwise the user has to edit the file to see any diagram.
+        // Delivered on the main queue because everything below it is
+        // main-actor state. (`PreviewViewController` uses the target/action
+        // form of this; `PreviewBridge` is not an `NSObject` subclass, so it
+        // takes the block form instead.)
+        plantUMLSettingsObserver = NotificationCenter.default.addObserver(
+            forName: PlantUMLSettings.didChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.plantUMLSettingsDidChange() }
+        }
     }
 
     deinit {
         pumpTask?.cancel()
         plantUMLTask?.cancel()
+        if let plantUMLSettingsObserver {
+            NotificationCenter.default.removeObserver(plantUMLSettingsObserver)
+        }
+    }
+
+    /// Re-runs the newest render pass against the new endpoint setting.
+    ///
+    /// Deliberately a full refresh rather than a re-send of the payload
+    /// already on screen: the preview's JS drops any payload whose revision
+    /// is not newer than what it is showing, so only a pass with a fresh
+    /// revision can rebuild the DOM — which is what restores the
+    /// "not configured" notice when the endpoint is cleared. The parse this
+    /// costs happens once per settings change, not per keystroke.
+    private func plantUMLSettingsDidChange() {
+        guard let parsed = currentParsedDocument, let source = lastSource else { return }
+        let enabled = PlantUMLSettings.shouldRender(
+            frontMatter: parsed.frontMatter,
+            endpoint: PlantUMLSettings.endpointURL,
+            blocks: parsed.blocks
+        )
+        // Nothing on screen depends on the endpoint unless this document
+        // renders diagrams now or was rendering them a moment ago. Documents
+        // that never opted in cost nothing when the setting changes.
+        guard enabled || plantUMLEnabled else { return }
+        forceRefresh(source: source)
     }
 
     func attach(preview: PreviewViewController, statusBar: StatusBarViewController) {
@@ -79,10 +127,12 @@ final class PreviewBridge {
         // byte count on the keystroke; skipping a duplicate update here
         // saves an `utf8.count` walk per call (O(N) for NSString-bridged
         // strings, which `NSTextView.string` returns).
+        lastSource = source
         Task { await scheduler.scheduleUpdate(source: source) }
     }
 
     func forceRefresh(source: String) {
+        lastSource = source
         Task { await scheduler.forceRefresh(source: source) }
     }
 

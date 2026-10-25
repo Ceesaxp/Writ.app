@@ -119,3 +119,68 @@ struct PlantUMLSettingsTests {
         #expect(PlantUMLSettings.shouldRender(frontMatter: fm, endpoint: Self.endpoint, blocks: [Self.plantUMLBlock]) == true)
     }
 }
+
+/// The endpoint setter is the one part of `PlantUMLSettings` that is not
+/// pure: it writes `UserDefaults` and announces the change so open previews
+/// re-render without the user having to touch the document.
+///
+/// Serialized, and each test restores the previous value, because both tests
+/// mutate the same global defaults key.
+@Suite("PlantUML endpoint change notification", .serialized)
+struct PlantUMLEndpointChangeTests {
+
+    @Test("committing a different endpoint posts didChange — this is what re-renders the open document")
+    func changedEndpointPostsDidChange() async {
+        let previous = PlantUMLSettings.endpointURLString
+        defer { PlantUMLSettings.endpointURLString = previous }
+        PlantUMLSettings.endpointURLString = "http://localhost:8080/svg"
+
+        await confirmation("PlantUMLSettings.didChange") { posted in
+            let token = NotificationCenter.default.addObserver(
+                forName: PlantUMLSettings.didChange,
+                object: nil,
+                queue: nil
+            ) { _ in posted() }
+            defer { NotificationCenter.default.removeObserver(token) }
+
+            PlantUMLSettings.endpointURLString = "https://kroki.io/plantuml/svg"
+        }
+        #expect(PlantUMLSettings.endpointURLString == "https://kroki.io/plantuml/svg")
+    }
+
+    @Test("clearing the endpoint posts didChange too, so the preview can fall back to the notice")
+    func clearedEndpointPostsDidChange() async {
+        let previous = PlantUMLSettings.endpointURLString
+        defer { PlantUMLSettings.endpointURLString = previous }
+        PlantUMLSettings.endpointURLString = "http://localhost:8080/svg"
+
+        await confirmation("PlantUMLSettings.didChange") { posted in
+            let token = NotificationCenter.default.addObserver(
+                forName: PlantUMLSettings.didChange,
+                object: nil,
+                queue: nil
+            ) { _ in posted() }
+            defer { NotificationCenter.default.removeObserver(token) }
+
+            PlantUMLSettings.endpointURLString = ""
+        }
+    }
+
+    @Test("rewriting the same endpoint posts nothing, so an unchanged commit costs no re-render")
+    func unchangedEndpointIsSilent() async {
+        let previous = PlantUMLSettings.endpointURLString
+        defer { PlantUMLSettings.endpointURLString = previous }
+        PlantUMLSettings.endpointURLString = "http://localhost:8080/svg"
+
+        await confirmation("PlantUMLSettings.didChange", expectedCount: 0) { posted in
+            let token = NotificationCenter.default.addObserver(
+                forName: PlantUMLSettings.didChange,
+                object: nil,
+                queue: nil
+            ) { _ in posted() }
+            defer { NotificationCenter.default.removeObserver(token) }
+
+            PlantUMLSettings.endpointURLString = "http://localhost:8080/svg"
+        }
+    }
+}
