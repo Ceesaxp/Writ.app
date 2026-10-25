@@ -1,5 +1,6 @@
 import Cocoa
 import WritCore
+import WritRender
 
 /// Simple preferences window. M3 scope is intentionally narrow:
 ///   - Large-document byte / line thresholds
@@ -26,11 +27,17 @@ final class PreferencesWindowController: NSWindowController {
     private let previewThemePopup = NSPopUpButton()
     private let customCSSButton = NSButton(title: "Choose…", target: nil, action: nil)
     private let customCSSLabel = NSTextField(labelWithString: "")
+    private let plantUMLEndpointField = NSTextField()
+    private let plantUMLTestButton = NSButton(title: "Test", target: nil, action: nil)
+    private let plantUMLStatusLabel = NSTextField(labelWithString: "")
     private let defaultLayoutPopup = NSPopUpButton()
 
     init() {
+        // Wider than the other rows need: the PlantUML endpoint field has
+        // to show a whole URL next to a standard-width row label, and
+        // taller for the three rows that row brings with it.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 648),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 778),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -169,6 +176,37 @@ final class PreferencesWindowController: NSWindowController {
         customCSSLabel.lineBreakMode = .byTruncatingMiddle
         customCSSLabel.maximumNumberOfLines = 1
 
+        let plantUMLHeading = NSTextField(labelWithString: "PlantUML renderer:")
+        plantUMLHeading.translatesAutoresizingMaskIntoConstraints = false
+        plantUMLHeading.font = NSFont.systemFont(ofSize: 13)
+
+        plantUMLEndpointField.translatesAutoresizingMaskIntoConstraints = false
+        plantUMLEndpointField.bezelStyle = .roundedBezel
+        plantUMLEndpointField.font = NSFont.systemFont(ofSize: 13)
+        plantUMLEndpointField.placeholderString = "http://localhost:8080/svg"
+        plantUMLEndpointField.target = self
+        plantUMLEndpointField.action = #selector(plantUMLEndpointDidCommit(_:))
+
+        plantUMLTestButton.translatesAutoresizingMaskIntoConstraints = false
+        plantUMLTestButton.bezelStyle = .rounded
+        plantUMLTestButton.target = self
+        plantUMLTestButton.action = #selector(testPlantUMLEndpoint(_:))
+
+        plantUMLStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        plantUMLStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        plantUMLStatusLabel.textColor = .secondaryLabelColor
+        plantUMLStatusLabel.lineBreakMode = .byTruncatingTail
+        plantUMLStatusLabel.maximumNumberOfLines = 1
+
+        // Says plainly what setting this costs: it is the one feature in
+        // Writ that sends document content off the machine.
+        let plantUMLExplanation = NSTextField(labelWithString: "Leave empty to disable PlantUML rendering. When set, the source of ```plantuml fences is sent to that server, and only from documents that also carry `plantuml: true` in their front matter.")
+        plantUMLExplanation.translatesAutoresizingMaskIntoConstraints = false
+        plantUMLExplanation.font = NSFont.systemFont(ofSize: 11)
+        plantUMLExplanation.textColor = .secondaryLabelColor
+        plantUMLExplanation.lineBreakMode = .byWordWrapping
+        plantUMLExplanation.maximumNumberOfLines = 3
+
         let defaultLayoutLabel = NSTextField(labelWithString: "Default layout:")
         defaultLayoutLabel.translatesAutoresizingMaskIntoConstraints = false
         defaultLayoutLabel.font = NSFont.systemFont(ofSize: 13)
@@ -212,6 +250,11 @@ final class PreferencesWindowController: NSWindowController {
         contentView.addSubview(customCSSHeading)
         contentView.addSubview(customCSSButton)
         contentView.addSubview(customCSSLabel)
+        contentView.addSubview(plantUMLHeading)
+        contentView.addSubview(plantUMLEndpointField)
+        contentView.addSubview(plantUMLTestButton)
+        contentView.addSubview(plantUMLStatusLabel)
+        contentView.addSubview(plantUMLExplanation)
         contentView.addSubview(defaultLayoutLabel)
         contentView.addSubview(defaultLayoutPopup)
         contentView.addSubview(resetButton)
@@ -322,7 +365,26 @@ final class PreferencesWindowController: NSWindowController {
             customCSSLabel.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
             customCSSLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
-            defaultLayoutLabel.topAnchor.constraint(equalTo: customCSSLabel.bottomAnchor, constant: 14),
+            plantUMLHeading.topAnchor.constraint(equalTo: customCSSLabel.bottomAnchor, constant: 14),
+            plantUMLHeading.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            plantUMLHeading.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
+
+            plantUMLEndpointField.centerYAnchor.constraint(equalTo: plantUMLHeading.centerYAnchor),
+            plantUMLEndpointField.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            plantUMLEndpointField.widthAnchor.constraint(equalToConstant: 300),
+
+            plantUMLTestButton.centerYAnchor.constraint(equalTo: plantUMLHeading.centerYAnchor),
+            plantUMLTestButton.leadingAnchor.constraint(equalTo: plantUMLEndpointField.trailingAnchor, constant: 8),
+
+            plantUMLStatusLabel.topAnchor.constraint(equalTo: plantUMLEndpointField.bottomAnchor, constant: 4),
+            plantUMLStatusLabel.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            plantUMLStatusLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+
+            plantUMLExplanation.topAnchor.constraint(equalTo: plantUMLStatusLabel.bottomAnchor, constant: 6),
+            plantUMLExplanation.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            plantUMLExplanation.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+
+            defaultLayoutLabel.topAnchor.constraint(equalTo: plantUMLExplanation.bottomAnchor, constant: 14),
             defaultLayoutLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
             defaultLayoutLabel.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
 
@@ -380,6 +442,8 @@ final class PreferencesWindowController: NSWindowController {
             customCSSLabel.stringValue = "(none — uses the theme as-is)"
             customCSSButton.title = "Choose…"
         }
+
+        plantUMLEndpointField.stringValue = PlantUMLSettings.endpointURLString
 
         let currentLayout = DocumentWindowController.defaultLaunchLayout.rawValue
         let layoutMatch = defaultLayoutPopup.itemArray.firstIndex {
@@ -443,6 +507,71 @@ final class PreferencesWindowController: NSWindowController {
         ExportService.includeTOC = (sender.state == .on)
     }
 
+    /// The trivial diagram the Test button renders. Fixed so a failure is
+    /// unambiguously the server's and not the diagram's.
+    private static let plantUMLTestDiagram = "@startuml\nAlice -> Bob: Writ\n@enduml"
+
+    @objc private func plantUMLEndpointDidCommit(_ sender: NSTextField) {
+        PlantUMLSettings.endpointURLString = sender.stringValue
+        plantUMLStatusLabel.stringValue = ""
+    }
+
+    @objc private func testPlantUMLEndpoint(_ sender: NSButton) {
+        // Clicking the button doesn't reliably end editing in the field,
+        // so commit what's typed through the same path a Return would —
+        // otherwise Test could probe a URL the preview isn't using.
+        PlantUMLSettings.endpointURLString = plantUMLEndpointField.stringValue
+
+        let typed = plantUMLEndpointField.stringValue
+        guard let endpoint = PlantUMLSettings.endpoint(from: typed) else {
+            plantUMLStatusLabel.stringValue = typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Empty — PlantUML rendering is off."
+                : "Not a usable address — needs http:// or https:// and a host."
+            return
+        }
+
+        sender.isEnabled = false
+        plantUMLStatusLabel.stringValue = "Testing…"
+        Task { [weak self] in
+            let message = await Self.probePlantUML(endpoint: endpoint)
+            guard let self else { return }
+            self.plantUMLStatusLabel.stringValue = message
+            sender.isEnabled = true
+        }
+    }
+
+    /// Renders the fixed test diagram and describes the outcome. Off the
+    /// main actor: the request shouldn't run on the actor that is holding
+    /// the preferences window's UI.
+    private nonisolated static func probePlantUML(endpoint: URL) async -> String {
+        let renderer = RemotePlantUMLRenderer(endpoint: endpoint)
+        do {
+            let svg = try await renderer.renderSVG(source: plantUMLTestDiagram)
+            return "OK — SVG received (\(svg.utf8.count) bytes)"
+        } catch {
+            // Caught generically on purpose. `PlantUMLRenderError` only
+            // models answers the server gave; the most common real
+            // failure — the server isn't running — arrives as a bare
+            // `URLError`, and narrowing the catch would report it as
+            // success by omission.
+            return "Failed — \(Self.describePlantUMLFailure(error))"
+        }
+    }
+
+    private nonisolated static func describePlantUMLFailure(_ error: any Error) -> String {
+        if let renderError = error as? PlantUMLRenderError {
+            switch renderError {
+            case .badStatus(let code):
+                return "server answered HTTP \(code)."
+            case .notSVG(let contentType):
+                return "answer wasn't SVG (Content-Type: \(contentType ?? "none"))."
+            case .empty:
+                return "server answered with an empty body."
+            }
+        }
+        return error.localizedDescription
+    }
+
     @objc private func previewThemeChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String,
               let theme = PreviewTheme(rawValue: raw) else { return }
@@ -479,6 +608,10 @@ final class PreferencesWindowController: NSWindowController {
         ExportService.pdfFontScalePercent = ExportService.pdfFontScalePercentDefault
         PreviewAppearance.theme = .github
         PreviewAppearance.setCustomCSSURL(nil)
+        // Back to empty, which is off: restoring defaults must not leave a
+        // configured network egress behind.
+        PlantUMLSettings.endpointURLString = ""
+        plantUMLStatusLabel.stringValue = ""
         DocumentWindowController.defaultLaunchLayout = .source
         loadFromDefaults()
     }

@@ -60,6 +60,13 @@ targets:
         NSSupportsAutomaticTermination: true
         NSSupportsSuddenTermination: false
         NSMainStoryboardFile: ""
+        # Scoped to local networking only: this permits cleartext HTTP to
+        # localhost and `.local` hosts, which a self-hosted PlantUML server
+        # or Kroki instance normally is, WITHOUT allowing arbitrary
+        # cleartext HTTP to the internet. Deliberately not
+        # NSAllowsArbitraryLoads.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Markdown Document
             CFBundleTypeRole: Editor
@@ -132,5 +139,9 @@ targets:
       - path: App/Sources/Editor/LatencyProbe.swift
       - path: App/Sources/Preview/PrintCompletionHandler.swift
       - path: App/Sources/Preview/OneShotWait.swift
+      - path: App/Sources/Preview/PlantUMLSettings.swift
     dependencies:
       - package: WritParser
+      # PlantUMLSettings gates on FrontMatter (WritParser) and
+      # TechnicalBlock (WritCore), so the test bundle needs both.
+      - package: WritCore
