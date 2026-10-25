@@ -150,6 +150,47 @@ struct EmojiOptOutTests {
     }
 }
 
+@Suite("Front-matter opt-in pragma")
+struct FrontMatterOptInTests {
+    /// Parses `source` as front matter and reads the `plantuml` pragma,
+    /// so the test exercises the real extractor (trimming, quote
+    /// stripping) rather than a hand-built `FrontMatter`.
+    private func plantumlEnabled(_ source: String) throws -> Bool {
+        let extracted = try #require(FrontMatterExtractor.extract(source))
+        return extracted.0.isEnabled("plantuml")
+    }
+
+    @Test("An absent key reads as not enabled")
+    func absentKeyIsDisabled() throws {
+        #expect(try plantumlEnabled("---\ntitle: Diagram doc\n---\nBody\n") == false)
+    }
+
+    @Test("plantuml: true enables the pragma")
+    func trueEnables() throws {
+        #expect(try plantumlEnabled("---\nplantuml: true\n---\nBody\n") == true)
+    }
+
+    @Test("The value is matched case-insensitively")
+    func uppercaseTrueEnables() throws {
+        #expect(try plantumlEnabled("---\nplantuml: TRUE\n---\nBody\n") == true)
+    }
+
+    @Test("plantuml: false leaves the pragma disabled")
+    func falseIsDisabled() throws {
+        #expect(try plantumlEnabled("---\nplantuml: false\n---\nBody\n") == false)
+    }
+
+    @Test("A value that is neither true nor false reads as not enabled")
+    func garbageValueIsDisabled() throws {
+        #expect(try plantumlEnabled("---\nplantuml: maybe\n---\nBody\n") == false)
+    }
+
+    @Test("A quoted true still enables the pragma")
+    func quotedTrueEnables() throws {
+        #expect(try plantumlEnabled("---\nplantuml: \"true\"\n---\nBody\n") == true)
+    }
+}
+
 @Suite("SwiftMarkdownParser")
 struct ParserTests {
     let parser = SwiftMarkdownParser()
