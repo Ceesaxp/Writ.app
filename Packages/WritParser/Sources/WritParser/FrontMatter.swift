@@ -30,6 +30,13 @@ public struct FrontMatter: Sendable {
         entries.first(where: { $0.key == key })?.value
     }
 
+    /// True when `key` is present and set to `false` (case-insensitive).
+    /// Front-matter pragmas are opt-*out*: an absent key means enabled, so
+    /// a missing or malformed value must read as "not disabled".
+    public func isDisabled(_ key: String) -> Bool {
+        self[key]?.lowercased() == "false"
+    }
+
     public init(
         format: Format,
         entries: [(key: String, value: String)],
