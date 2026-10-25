@@ -609,9 +609,24 @@ these are gaps in **evidence**, plus one measured regression.
       block **density** (`code-heavy` and `mermaid-heavy` both 1.09×), and
       cost per byte roughly doubles from 1 MB to 5 MB — so it is
       super-linear per-line or per-character work. `data-writ-line` is ruled
-      out by inspection. Next suspects: the inline `Text`-node transforms
-      from 0.4.11 (emoji shortcodes, bare-URL autolinking), which scan every
-      `Text` node and postdate the gate document. **Needs a bisect.**
+      out by inspection. **Bisected to `fc438ca`** ("feat: emoji shortcodes
+      + autolink bare URLs", v0.4.11) — one commit accounts for the whole
+      regression; everything after it is flat.
+      Cause: `AutolinkExtractor.findNextStart` probes every character
+      position for each candidate scheme via a `startsWith` helper that
+      bridges the needle to `NSString`, allocates a substring, and calls
+      `lowercased()` on both sides — ~3 M calls and ~12 M String
+      allocations for a 1 MB document, which in `1mb.md` find **zero**
+      URLs. Secondary: `EmojiShortcodes.substitute` rebuilds the whole
+      string via `Character` iteration whenever a `:` appears anywhere.
+      Fix shape and the measurement matrix are in
+      `docs/04-M1-PERF-GATE.md`. **Not yet fixed.**
+- [ ] **`math-heavy` is ~12× its M0 number and unexplained** — ~8.5 ms at
+      M0, ~80 ms when the gate doc was written, ~105 ms now. It measures
+      the same at `cae9d46`, `fc438ca` and `master`, so it is **not** the
+      autolink bug above; it predates that bisect range and has never been
+      investigated. The gate doc has carried it as "filed for follow-up"
+      since 2026-05-20 without it ever reaching this file.
 - [ ] **Four of the plan's nine required measurements were never taken** —
       MVP plan §5. Absent: export time for representative technical
       documents; memory usage at 1 MB and at 5 MB. Qualitative only, and
