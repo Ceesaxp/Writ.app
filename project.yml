@@ -127,5 +127,10 @@ targets:
         PRODUCT_NAME: WritTests
     sources:
       - path: App/Tests
+      - path: App/Sources/Editor/BlockSelection.swift
+      - path: App/Sources/Editor/WritTextView.swift
+      - path: App/Sources/Editor/LatencyProbe.swift
       - path: App/Sources/Preview/PrintCompletionHandler.swift
       - path: App/Sources/Preview/OneShotWait.swift
+    dependencies:
+      - package: WritParser

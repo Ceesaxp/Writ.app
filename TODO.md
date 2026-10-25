@@ -19,6 +19,7 @@ Outstanding M1 polish items (non-blocking, circle back as the session permits):
 - [x] **PDF export programmatic smoke test** (commit `216edab`) — three HTMLExporter tests: TOC prepended inside content main; every TOC anchor resolves to an HTML id (cross-package slug parity); empty TOC string omits the nav block. Live WKWebView printOperation path remains manual via the smoke checklist.
 - [x] **Strict P0 perf gate measurements** (commit `f62d678`) — docs/04-M1-PERF-GATE.md. 1MB parse p50 192ms, 5MB 953ms, 10KB 2.2ms; all gate criteria PASS with margin.
 - [x] **Undo/redo through `applyEditorText` round-trip** (commit `1076b3c`) — pattern test in WritCoreTests using NSUndoManager + FakeDocument stand-in. App-level test bundle blocked by Xcode 17 + Swift 6 + executable-host swiftmodule conflict; pattern coverage serves as regression lock.
+  - **Unblocked** during the block-selection work: the conflict was the *test host*, not the test bundle. `App/Tests/WritTextViewHarness.swift` drives the production `WritTextView` on a real TextKit 1 stack in an off-screen window, with no run loop and no test host — `insertText`, `deleteBackward`, `copy` and undo all respond synchronously. Any future NSTextView-level regression can now be covered directly.
 
 ---
 
@@ -495,3 +496,30 @@ The headline minor-version bump. Closes the last two issues on the
       Verified: 20 consecutive switches across every Source/Split/Preview
       combination leave the frame byte-identical. The outline sidebar
       still grows the window by its own width, which is intended.
+
+---
+
+## Block (rectangular) selection — code complete, awaiting manual pass
+
+BBEdit/Zed-style column selection: ⌥-drag, or ⌥⇧↑/↓ to start a block and
+⌥⇧←/→ to widen a live one. Design and measured AppKit behaviour in
+`docs/06-BLOCK-SELECTION.md`; **the manual checklist is §8 there**.
+
+Branch `feat/block-selection`. 113 tests (57 new), app builds without
+warnings.
+
+- [x] Pure model — `BlockSelection`, `LineIndex`, `BlockEdit`; fragments,
+      copy string, replacement/paste/backspace/forward-delete edit plans
+- [x] Grapheme safety — edges snap outward to whole composed character
+      sequences, carets snap to the grapheme start, both clamped to their
+      own line (Foundation joins a `\n` to a combining mark that follows it)
+- [x] Headless NSTextView harness — `App/Tests/WritTextViewHarness.swift`.
+      This is what the M1 item above recorded as blocked; the blocker was
+      the test *host*, not the bundle
+- [x] View state, edit interception, drop rules at the two choke points
+- [x] Keyboard path + hit-testing
+- [x] ⌥-drag tracking loop + carets for the rows AppKit won't draw
+- [ ] **Manual pass against `docs/06-BLOCK-SELECTION.md` §8** — the drag
+      loop and the caret drawing have no automated cover
+- [ ] ⌥-double-click collapses to a caret instead of selecting a word
+      (known rough edge, §7)
