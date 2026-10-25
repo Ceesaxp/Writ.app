@@ -59,3 +59,124 @@ swift run --configuration release writ-bench \
   "$(pwd)/Fixtures" \
   "$(pwd)/Results/m0-parser.json"
 ```
+
+## Re-measure 2026-10-25 — the gate no longer holds
+
+Host: macOS 27.2, Apple Silicon. Same `--configuration release`, same
+`writ-bench`, and **byte-identical fixtures** (`git diff f62d678 HEAD --
+Benchmarks/Fixtures/` is empty).
+
+The numbers above were taken at `f62d678` on macOS 24.6. Re-running on the
+current tree showed parse times 3–6× higher, so the comparison was isolated
+against two confounds before drawing any conclusion: the host OS, and the
+`swift-markdown` version. Both manifests declare `from: "0.6.0"`, an open
+range, so a freshly-resolved worktree picks up a newer library than the
+committed lockfile pins — the first attempt at this comparison accidentally
+ran old code on 0.9.0 against current code on 0.8.0 and was invalid.
+
+Each cell is the p50 of two alternating runs, nothing else building:
+
+| Fixture | old code (f62d678) + 0.9.0 | current + 0.8.0 | current + 0.9.0 | same-library change |
+|---|---:|---:|---:|---:|
+| `10kb.md` | 1.9 ms | 5.1 ms | 5.5 ms | **2.9×** |
+| `1mb.md` | 157 ms | 555 ms | 555 ms | **3.5×** |
+| `5mb.md` | 795 ms | 4 868 ms | 4 872 ms | **6.1×** |
+| `code-heavy.md` | 7.1 ms | 7.7 ms | 7.7 ms | 1.09× |
+| `math-heavy.md` | 73 ms | 107 ms | 107 ms | 1.46× |
+| `mermaid-heavy.md` | 2.46 ms | 2.67 ms | 2.69 ms | 1.09× |
+
+**Conclusions.**
+
+- **Not the host.** Old code on this machine runs *faster* than its own
+  recorded numbers (157 ms vs 193 ms for 1 MB; 795 ms vs 953 ms for 5 MB).
+- **Not the dependency.** Current code is equally slow on 0.8.0 and 0.9.0.
+  The library version moves nothing.
+- **It is Writ's own parse/emit path**, and the shape is diagnostic: the
+  cost scales with **document size** and is flat against **block density**.
+  `code-heavy` (18 KB, many fences) and `mermaid-heavy` (6.6 KB, 60 blocks)
+  are unchanged at 1.09×, while the three plain-prose size fixtures regress
+  2.9× / 3.5× / 6.1×. Cost per byte roughly doubles from 1 MB to 5 MB, so
+  the work is super-linear in length — something per-line or per-character
+  that scans more than it should, not the per-block attribute emission.
+
+Gate impact:
+
+| Gate criterion | Then | Now |
+|---|---|---|
+| 1 MB opens to editable < 1 s | 193 ms parse, > 800 ms headroom | 555 ms parse, ~445 ms headroom — **tight** |
+| 5 MB editable, main thread unblocked | 953 ms off-main | 4 872 ms off-main — still off-main, but a ~5 s wait for first preview |
+| 10 KB preview < 500 ms after debounce | 2.2 ms | 5.5 ms — **still passes comfortably** |
+| Typing lag / scroll smoothness | qualitative, TextKit 2 | **unverified** — the editor moved to TextKit 1 since |
+
+### Bisected 2026-10-25 — `fc438ca`, the autolink scanner
+
+`git bisect` over the 82 commits in `f62d678..master`, measuring `1mb.md`
+p50 with the dependency pinned at every step and the predicate validated
+against both endpoints first. Seven steps, no skips. First bad commit:
+
+```
+fc438ca feat: emoji shortcodes + autolink bare URLs (v0.4.11)
+```
+
+It accounts for **the entire regression** — everything after it is flat:
+
+| Fixture | `cae9d46` (parent) | `fc438ca` (culprit) | `master` |
+|---|---:|---:|---:|
+| `10kb.md` | 1.69 ms | 5.67 ms | 5.1 ms |
+| `1mb.md` | 157.7 ms | 545.7 ms | 549 ms |
+| `5mb.md` | 786.6 ms | 4 849.9 ms | 4 868 ms |
+| `code-heavy.md` | 7.0 ms | 7.7 ms | 7.7 ms |
+| `math-heavy.md` | 104.6 ms | 106.4 ms | 107 ms |
+| `mermaid-heavy.md` | 2.49 ms | 2.66 ms | 2.69 ms |
+
+**Mechanism.** `AutolinkExtractor.findNextStart` walks every character
+position in every `Text` node and calls `startsWith(ns, at:, needle)` once
+per candidate scheme (`https://`, `http://`, `www.`). That helper, per call:
+
+```swift
+let n = (needle as NSString).length              // bridges the needle
+let slice = ns.substring(with: NSRange(...))     // allocates a String
+return slice.lowercased() == needle.lowercased() // allocates two more
+```
+
+So a 1 MB document performs roughly **3 million of those calls and ~12
+million String allocations**, re-lowercasing the same string literals every
+time. `1mb.md` contains **zero** `http`/`www` occurrences, so all of that
+work finds nothing. This is also why the cost tracks document *size* and not
+block density, and why `code-heavy` and `mermaid-heavy` barely move: their
+text volume is small.
+
+The emoji pass contributes a second, smaller cost — `1mb.md` has 403 colons,
+so `EmojiShortcodes.substitute` rebuilds the whole string via `Character`
+iteration rather than returning early.
+
+**Fix shape** (not yet applied): compare UTF-16 code units in place against
+precomputed `[UInt16]` needles with an inline ASCII case-fold — no bridging,
+no substring, no `lowercased()`. Better still, cheap-reject on the first
+code unit (`h`/`H`/`w`/`W`) before probing at all, which skips the large
+majority of positions. Also minor: the trailing-`)` trim runs two full
+`url.filter` passes per removed character.
+
+`data-writ-line` was the first suspect and is ruled out — `html` byte counts
+are identical at `cae9d46` and `master`, and
+`HTMLEmitter.sourceLineAttribute(for:)` reads `markup.range?.lowerBound.line`
+straight from swift-markdown, O(1).
+
+### Separate, still unexplained: `math-heavy`
+
+The 9× `math-heavy` regression noted above (M0 ~8.5 ms → 80 ms at
+`f62d678`) is **not** this bug. It measures ~105 ms at `cae9d46`, at
+`fc438ca` and at `master` alike, so it predates this bisect range entirely
+and remains uninvestigated.
+
+### How to reproduce this comparison
+
+```sh
+# old code, in a throwaway worktree
+git worktree add /tmp/old-perf f62d678
+cd /tmp/old-perf/Benchmarks && swift build -c release
+# pin BOTH trees to the same library version before comparing, or the
+# open-ended `from:` requirement will silently resolve them differently
+.build/release/writ-bench <repo>/Benchmarks/Fixtures /tmp/old.json
+```
+

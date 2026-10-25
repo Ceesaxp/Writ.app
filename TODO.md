@@ -32,7 +32,12 @@ Outstanding M2 items:
 - [x] **Two-way scroll sync** (commit `4012bab`) — writ.js posts `previewScrolled` on debounced scroll; the editor scrolls to match. Ping-pong is prevented by mutual suppression flags.
 - [x] **Preview sanitization** (commit `4012bab`) — `HTMLSanitizer` strips dangerous tags + event handlers + `javascript:` URLs from raw `HTMLBlock` / `InlineHTML` source.
 - [x] **Auto-pair brackets / quotes / fence markers** (commit `4012bab`) — `EditorViewController.handleAutoPair` inserts the closing pair and positions the cursor between; wraps existing selections; smart skip past closing chars; apostrophe-after-letter preserved for contractions.
-- [ ] Tests for insert-block helpers and the scroll-sync delegate hook (both depend on an NSTextView harness; deferred).
+- [ ] Tests for insert-block helpers and the scroll-sync delegate hook.
+      **The stated blocker is gone**: `App/Tests/WritTextViewHarness.swift`
+      (0.6.0) drives the production `WritTextView` headlessly, so these are
+      now ordinary tests rather than deferred ones. Same applies to
+      auto-pair (EDIT-05) and the Markdown formatting commands (EDIT-07),
+      which `docs/05-FEATURE-VALIDATION.md` still classes Manual-only.
 
 ---
 
@@ -40,7 +45,7 @@ Outstanding M2 items:
 
 Done:
 - [x] **External file change detection** — `WritDocument.presentedItemDidChange` shows an NSAlert sheet, unsaved-edits aware, `revert(toContentsOf:)` keeps editor + preview in sync.
-- [x] **Optional line numbers** — custom `LineNumberGutter` NSView walks `NSTextLayoutManager.enumerateTextLayoutFragments`, top-aligns numbers on wrapped lines. Default on; View > Show Line Numbers (⌥⌘L).
+- [x] **Optional line numbers** — custom `LineNumberGutter` NSView walks `NSLayoutManager.enumerateLineFragments`, top-aligns numbers on wrapped lines. Default on; View > Show Line Numbers (⌥⌘L). *(Corrected 2026-10-25: this entry described the TextKit 2 `NSTextLayoutManager.enumerateTextLayoutFragments` API; the gutter was rewritten for TK1 with the editor and the note was never updated.)*
 - [x] **AST-driven incremental syntax highlighter** — `SyntaxSpanExtractor` builds spans from `swift-markdown`'s tree + line-level scans for math / list / task / table separators; honours block boundaries.
 - [x] **Block-aware scroll sync** — `HTMLEmitter` emits `data-writ-line`; preview JS `scrollToSourceLine(line, fallback)` aligns the matching block.
 - [x] **Improved HTML export bundling** — inlines theme + KaTeX + highlight.js CSS so exported math, code, and typography render without external assets.
@@ -49,7 +54,15 @@ Done:
 - [x] **Configurable large-document thresholds** — PreferencesWindowController (⌘,) edits byte/line thresholds, debounce intervals, line-numbers toggle; persisted in `UserDefaults`.
 
 Remaining:
-- [x] **Find/replace stress on 5 MB+ documents** (commit `a2b9b2f`) — codified as a section in `samples/preview-smoke/CHECKLIST.md`. Manual walk against `Benchmarks/Fixtures/5mb.md`.
+- [~] **Find/replace stress on 5 MB+ documents** (commit `a2b9b2f`) — the
+      *checklist section* was written (`samples/preview-smoke/CHECKLIST.md`,
+      manual walk against `Benchmarks/Fixtures/5mb.md`). **Not actually
+      closed**, on two counts, both found in the 2026-10-25 plan review:
+      no record exists of the walk ever being run, and the MVP plan's M3
+      item is "*Improved* find/replace behavior for large documents" —
+      find/replace is still stock `NSTextFinder` with no large-document
+      work. Decide whether stock is adequate (then run the walk and record
+      it) or whether the plan item still stands.
 - [x] **Folder window file-system watching** (commit `5595a41`) — `FolderWatcher` uses FSEventStreamRef recursively under the open folder; bursts coalesce through a 250ms debounce.
 
 ---
@@ -69,7 +82,11 @@ Per MVP plan §3 M4. Priorities re-confirmed 2026-05-20:
 - [ ] Optional local PlantUML rendering — **deferred** post-MVP.
 - [ ] DOM patching preview updates — **gated** on measurement;
       only pursue if full-reload becomes inadequate.
-- [ ] Theme system — **deferred** until MVP is fully done.
+- [x] Theme system — **shipped in 0.5.0**, ahead of its M4 slot: four
+      preview themes (`github`, `serif`, `mono`, `sans`) plus the custom-CSS
+      escape hatch. *(Corrected 2026-10-25; this line still read "deferred".)*
+      Related open item: issue #3, fonts bundling — the themes name Iowan Old
+      Style, Inter and SF Pro and degrade silently on a machine without them.
 - [ ] Deeper folder/workspace features — **scope undefined**;
       MVP plan kept this open ("if user demand is validated").
       Candidate scopes if/when picked up: tree view vs flat list,
@@ -141,6 +158,12 @@ Outside the strict M0–M4 plan. Bundle into a post-MVP polish pass.
       `needsDisplay` on every storage edit. Catches both user
       keystrokes and the highlighter pass.
 
+      *Historical note (2026-10-25): this fix is **gone from the code** and
+      the diagnosis no longer applies. It was specific to TextKit 2's
+      viewport layout; the editor has since moved to TextKit 1, which lays
+      out eagerly, and `layoutViewport()` appears nowhere in the sources.
+      Kept for the record of why the migration was worth doing.*
+
 ---
 
 ## v0.4.9 — editor stability — **DONE 2026-06-08**
@@ -161,6 +184,12 @@ compounding fixes.
       silently re-measured fragments above the viewport, so the same
       `clipView.bounds.origin.y` ended up pointing at a different
       source line.
+
+      *Status note (2026-10-25): parts 1 and 2/3 below **survive** on
+      TextKit 1 — `fixedLineHeightParagraphStyle` and the highlighter's
+      `editedRange` scope expansion are both still in the code and still
+      load-bearing. The TextKit 2 fragment-measurement diagnosis that
+      motivated them is historical.*
 
       The fix combines three things:
         1. `EditorViewController.fixedLineHeightParagraphStyle(for:)`
@@ -320,9 +349,10 @@ The headline minor-version bump. Closes the last two issues on the
       issues sandboxed WKWebViews trip over. Exports inline the same
       contents.
 
-      Open follow-up: FSEvents-driven hot reload on file change
-      (currently the user has to re-pick the file to pick up edits
-      they made externally). Small; can land as 0.5.1.
+      Follow-up **done**: FSEvents-driven hot reload on file change ships
+      as `App/Sources/Preview/CustomCSSWatcher.swift`; the user no longer
+      has to re-pick the file. *(Corrected 2026-10-25; this read as an open
+      follow-up.)*
 
 ### Deferred from 0.5.0 to 1.0.0 (2026-06-04)
 
@@ -561,3 +591,66 @@ since AppKit draws its own indicator above `draw(_:)`.
       Verified: 20 consecutive switches across every Source/Split/Preview
       combination leave the frame byte-identical. The outline sidebar
       still grows the window by its own width, which is intended.
+
+---
+
+## Open from the 2026-10-25 plan review
+
+Found by reading `docs/01-MVP-PLAN.md` back against the code rather than
+against this file. Implementation is essentially complete against the plan;
+these are gaps in **evidence**, plus one measured regression.
+
+- [ ] **Parse path is 3–6× slower than the recorded P0 gate.** Measured, and
+      isolated against both the host OS and the `swift-markdown` version —
+      it is Writ's own code. Same-library comparison vs `f62d678`:
+      10 KB 2.9×, 1 MB 3.5× (157 → 555 ms), 5 MB 6.1× (795 ms → 4 872 ms).
+      Full matrix and method in `docs/04-M1-PERF-GATE.md`. The shape is
+      diagnostic: cost scales with document **size** and is flat against
+      block **density** (`code-heavy` and `mermaid-heavy` both 1.09×), and
+      cost per byte roughly doubles from 1 MB to 5 MB — so it is
+      super-linear per-line or per-character work. `data-writ-line` is ruled
+      out by inspection. **Bisected to `fc438ca`** ("feat: emoji shortcodes
+      + autolink bare URLs", v0.4.11) — one commit accounts for the whole
+      regression; everything after it is flat.
+      Cause: `AutolinkExtractor.findNextStart` probes every character
+      position for each candidate scheme via a `startsWith` helper that
+      bridges the needle to `NSString`, allocates a substring, and calls
+      `lowercased()` on both sides — ~3 M calls and ~12 M String
+      allocations for a 1 MB document, which in `1mb.md` find **zero**
+      URLs. Secondary: `EmojiShortcodes.substitute` rebuilds the whole
+      string via `Character` iteration whenever a `:` appears anywhere.
+      Fix shape and the measurement matrix are in
+      `docs/04-M1-PERF-GATE.md`. **Not yet fixed.**
+- [ ] **`math-heavy` is ~12× its M0 number and unexplained** — ~8.5 ms at
+      M0, ~80 ms when the gate doc was written, ~105 ms now. It measures
+      the same at `cae9d46`, `fc438ca` and `master`, so it is **not** the
+      autolink bug above; it predates that bisect range and has never been
+      investigated. The gate doc has carried it as "filed for follow-up"
+      since 2026-05-20 without it ever reaching this file.
+- [ ] **Four of the plan's nine required measurements were never taken** —
+      MVP plan §5. Absent: export time for representative technical
+      documents; memory usage at 1 MB and at 5 MB. Qualitative only, and
+      taken on TextKit 2 so they describe a stack the editor no longer uses:
+      typing latency during active debounce, editor scroll frame pacing.
+- [ ] **No execution record for the manual verification surface.**
+      `docs/05-FEATURE-VALIDATION.md` classes 25 of 46 capabilities
+      Manual-only — including EDIT-01 (the editor itself), PREV-01/03,
+      EXP-02 and PERF-02. `git log` shows the smoke checklist being *added*,
+      and one `fix: four UI/UX issues found in preview smoke walk-through`,
+      so a walk happened once early. There is no "last run" field and no
+      per-release record, so for any current build the answer to "has this
+      been exercised?" is unknown. Consider a dated run log, or convert what
+      the harness can now reach (below) and shrink the manual surface.
+- [ ] **Convert the newly-automatable Manual rows.** The 0.6.0 headless
+      harness removes the stated blocker for EDIT-05 (auto-pair), EDIT-07
+      (Markdown formatting commands), and the two M2 tests deferred above.
+      All are pure text transforms. One packet.
+- [ ] **Issue #3, fonts bundling** — a quality gap in a *shipped* feature,
+      not a deferral: the 0.5.0 themes name Iowan Old Style, Inter and
+      SF Pro and degrade silently on a machine without them.
+
+Still open elsewhere in this file, unchanged by the review: the large-document
+cold-export blank (0.5.6), and ⌥-double-click in block selection (0.6.0).
+Correctly deferred per the plan: PlantUML rendering, DOM patching (gated on
+measurement — note the numbers above now argue *for* revisiting it),
+issue #11 workspace/project, issues #23/#24 preview annotations.
