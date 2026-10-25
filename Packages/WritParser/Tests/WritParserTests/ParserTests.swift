@@ -716,4 +716,34 @@ struct ParserTests {
         #expect(p.html.contains("<a href=\"https://foo.com\">https://foo.com</a>"))
         #expect(!p.html.contains("foo.com)"))
     }
+
+    @Test("Autolink: uppercase scheme is still recognised")
+    func autolinkUppercaseScheme() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Visit HTTPS://Example.COM today.")
+        let p = try parser.parse(s)
+        // The scheme match is case-insensitive; the URL text and href
+        // keep the author's original casing.
+        #expect(p.html.contains("<a href=\"HTTPS://Example.COM\">HTTPS://Example.COM</a>"))
+    }
+
+    @Test("Autolink: uppercase www host prepends http:// scheme")
+    func autolinkUppercaseWWWPrefix() throws {
+        let s = DocumentSnapshot(revision: .zero, source: "Try WWW.Example.com next.")
+        let p = try parser.parse(s)
+        #expect(p.html.contains("<a href=\"http://WWW.Example.com\">WWW.Example.com</a>"))
+    }
+
+    @Test("Autolink: URL after a non-BMP character is not shifted")
+    func autolinkAfterNonBMPCharacter() throws {
+        // U+1F600 is a surrogate pair in UTF-16. Match ranges are
+        // UTF-16 based, so the prefix/display arithmetic must count
+        // two code units for it — a one-unit slip would eat the space
+        // or truncate the anchor text.
+        let s = DocumentSnapshot(revision: .zero, source: "\u{1F600} https://foo.com")
+        let p = try parser.parse(s)
+        #expect(p.html.contains(" <a href=\"https://foo.com\">https://foo.com</a>"))
+        // The emoji itself survives intact (scalar compare — Foundation's
+        // range(of:) is unreliable for non-ASCII needles here).
+        #expect(p.html.unicodeScalars.contains("\u{1F600}"))
+    }
 }
