@@ -329,6 +329,37 @@ final class PreviewViewController: NSViewController {
         }
     }
 
+    /// Patch already-rendered blocks in place, without re-sending the
+    /// document. Used by the remote PlantUML path: the payload for a
+    /// revision goes out immediately with the fences as source, and the
+    /// SVGs arrive here whenever the server gets around to answering.
+    ///
+    /// `revision` lets the JS side drop a result the document has already
+    /// moved past. The SVG was sanitised natively before it got here.
+    func applyResolvedBlocks(_ resolved: [String: String], revision: UInt64) {
+        guard !resolved.isEmpty else { return }
+        let json: String
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: ["revision": revision, "resolved": resolved],
+                options: []
+            )
+            json = String(decoding: data, as: UTF8.self)
+        } catch {
+            previewLog.error("failed to encode resolved blocks: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        // Tolerate a preview that was never loaded: in Source-only layout
+        // the split item is collapsed, so AppKit may never have asked for
+        // the view and `webView` is still nil.
+        guard let webView else {
+            previewLog.notice("applyResolvedBlocks: preview webview not loaded; skipping")
+            return
+        }
+        previewLog.notice("applyResolvedBlocks rev=\(revision) count=\(resolved.count)")
+        webView.evaluateJavaScript("window.Writ && window.Writ.applyResolvedBlocks(\(json))", completionHandler: nil)
+    }
+
     func scrollToRatio(_ ratio: Double) {
         guard isReady else { return }
         let clamped = max(0, min(1, ratio))
