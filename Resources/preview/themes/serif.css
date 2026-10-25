@@ -42,7 +42,7 @@
   }
 }
 
-html[data-writ-theme="serif"] body { font-size: 16px; }
+html[data-writ-theme="serif"] { --writ-base-font-size: 16px; }
 
 html[data-writ-theme="serif"] #writ-content {
   text-align: justify;
