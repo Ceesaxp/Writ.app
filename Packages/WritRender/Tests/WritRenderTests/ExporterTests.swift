@@ -159,6 +159,31 @@ struct ExporterTests {
         #expect(html.contains("writ-front-matter"))
     }
 
+    /// Every rule in the preview-theme overlays
+    /// (`Resources/preview/themes/*.css`) is scoped to
+    /// `html[data-writ-preview-theme="<name>"]`. `ExportService` inlines
+    /// the active overlay into the exported file, so the root element has
+    /// to carry that attribute — otherwise the inlined CSS matches nothing
+    /// and the export silently renders with the base look instead of the
+    /// theme the user picked.
+    @Test("Render stamps the active preview theme on the root element")
+    func previewThemeAttributeOnRoot() throws {
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: "# Hi"))
+
+        let fromParsed = HTMLExporter.render(parsed: parsed, theme: "auto", previewTheme: "serif", css: "")
+        #expect(fromParsed.contains("data-writ-preview-theme=\"serif\""))
+
+        // The body overload is the one the live-preview capture path uses,
+        // so it needs the attribute just as much.
+        let fromBody = HTMLExporter.render(body: "<p>x</p>", theme: "auto", previewTheme: "serif", css: "")
+        #expect(fromBody.contains("data-writ-preview-theme=\"serif\""))
+
+        // The legacy `theme:` parameter is a colour-scheme hint and must
+        // keep driving the body class, independently of the overlay name.
+        #expect(fromParsed.contains("writ-theme-auto"))
+    }
+
     @Test("Document header tolerates date_created in place of date")
     func docHeaderDateCreatedAlias() throws {
         let src = """
