@@ -235,7 +235,7 @@ final class WritTextView: NSTextView {
         if let (fm, _) = FrontMatterExtractor.extract(source) {
             let prefix = source.prefix(fm.charCount)
             let utf16Length = (String(prefix) as NSString).length
-            let mathDisabled = fm["math"]?.lowercased() == "false"
+            let mathDisabled = fm.isDisabled("math")
             info = FrontMatterInfo(utf16Length: utf16Length, mathDisabled: mathDisabled)
         } else {
             info = .empty

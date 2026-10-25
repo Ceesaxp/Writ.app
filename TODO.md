@@ -637,7 +637,9 @@ these are gaps in **evidence**, plus one measured regression.
       ~3.8 ms). Returning early unless a table lookup actually hits would
       recover most of it and bring 1 MB back to the ~158 ms measured before
       the feature existed. Low priority — the gate passes with > 800 ms of
-      headroom.
+      headroom. A per-document `emoji: false` front-matter pragma now exists
+      and does skip the pass entirely, but only for documents that opt out;
+      the default path still pays the ~20 ms, so this item stays open.
 - [ ] **`InlineTextTransform.swift` has a pre-existing logic bug** —
       `if !url.contains("."), url.count < 4 { … }` uses a comma (AND)
       where its own comment describes an `||`. Left untouched during the

@@ -79,7 +79,7 @@ public struct SwiftMarkdownParser: MarkdownParser {
         // both inline and block math extraction for documents heavy
         // with currency text or other prose that conflicts with the
         // inline `$…$` heuristics.
-        let mathEnabled = !((frontMatter?["math"]?.lowercased() == "false"))
+        let mathEnabled = !(frontMatter?.isDisabled("math") ?? false)
         let (preprocessed, mathBlocks): (String, [MathPreprocessor.Extracted])
         if mathEnabled {
             (preprocessed, mathBlocks) = MathPreprocessor.extract(bodySource)

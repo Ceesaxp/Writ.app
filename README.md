@@ -79,6 +79,33 @@ MVP non-goals:
 - Full publishing platform
 - Heavy custom theme engine
 
+## Front Matter
+
+Writ reads a YAML (`---`) or TOML (`+++`) front-matter block at the top of a
+document. Keys are surfaced to the preview, and `tags` is parsed as a list.
+
+Two keys are *pragmas* — per-document switches for rendering behaviour that
+sometimes fights with the prose you are actually writing. Both are **opt-out**:
+the feature is on unless the key is present and set to `false`.
+
+| Pragma | Effect when `false` |
+|---|---|
+| `math: false` | Disables inline `$…$` and block `$$…$$` math extraction, in the preview *and* in editor syntax highlighting. Use it for documents full of currency amounts, where the `$` heuristics misfire. |
+| `emoji: false` | Disables `:shortcode:` → glyph substitution, so `:shrug:` renders literally. Use it for prose that is dense with colons, or when you simply want the text left alone. |
+
+```markdown
+---
+title: Q3 Pricing
+math: false
+emoji: false
+---
+
+Seats are $40 each, and the :tada: stays as written.
+```
+
+Any other value — including an absent key, `true`, or something malformed —
+leaves the feature enabled.
+
 ## Architecture
 
 Writ is a native macOS app with a small set of local Swift packages:

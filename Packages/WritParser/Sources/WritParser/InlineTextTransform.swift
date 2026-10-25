@@ -5,7 +5,9 @@ import Foundation
 ///
 ///   1. **Emoji shortcodes** — `:smile:` → 😄, matched against a static
 ///      table of GitHub-style names. Patterns not in the table are
-///      left literal (no error, no warning). Always applied.
+///      left literal (no error, no warning). Skipped when `allowEmoji`
+///      is false (the document opted out with front-matter
+///      `emoji: false`), in which case the table is never consulted.
 ///   2. **Autolink bare URLs (GFM)** — `https://example.com` and
 ///      `www.example.com` are emitted as `<a href="…">…</a>`.
 ///      Trailing punctuation is trimmed from the link's text. Skipped
@@ -20,11 +22,12 @@ enum InlineTextTransform {
     /// `escape` is the emitter's HTML-escape helper.
     static func emit(
         text: String,
+        allowEmoji: Bool,
         allowAutolink: Bool,
         into out: inout String,
         escape: (String) -> String
     ) {
-        let substituted = EmojiShortcodes.substitute(in: text)
+        let substituted = allowEmoji ? EmojiShortcodes.substitute(in: text) : text
         guard allowAutolink else {
             out.append(escape(substituted))
             return

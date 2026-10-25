@@ -98,8 +98,7 @@ final class MarkdownSyntaxHighlighter {
         // also stop tinting `$…$` / `$$…$$` ranges as math. The
         // renderer already respects the flag via `MarkdownParser`;
         // this just lines the editor up with the same view.
-        let mathDisabled = FrontMatterExtractor.extract(source)
-            .flatMap { $0.0["math"]?.lowercased() == "false" } ?? false
+        let mathDisabled = FrontMatterExtractor.extract(source)?.0.isDisabled("math") ?? false
         let newSpans: [SyntaxSpan]
         if mathDisabled {
             newSpans = allSpans.filter { span in

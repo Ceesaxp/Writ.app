@@ -116,6 +116,40 @@ struct MathOptOutTests {
     }
 }
 
+@Suite("Emoji front-matter opt-out")
+struct EmojiOptOutTests {
+    @Test("emoji: false in front matter disables shortcode substitution")
+    func emojiFalseDisables() throws {
+        let src = """
+        ---
+        emoji: false
+        ---
+        A literal :smile: shortcode.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        // The shortcode survives verbatim, and no glyph is substituted.
+        #expect(parsed.html.contains(":smile:"))
+        #expect(!parsed.html.unicodeScalars.contains("\u{1F604}"))
+    }
+
+    @Test("Default (no flag) keeps emoji substitution enabled")
+    func emojiDefaultEnabled() throws {
+        let src = """
+        ---
+        title: Emoji doc
+        ---
+        A literal :smile: shortcode.
+        """
+        let parser = SwiftMarkdownParser()
+        let parsed = try parser.parse(DocumentSnapshot(revision: .zero, source: src))
+        // Non-ASCII needle: compare scalars, since `contains(_: String)`
+        // routes through `range(of:)` and has produced false negatives here.
+        #expect(parsed.html.unicodeScalars.contains("\u{1F604}"))
+        #expect(!parsed.html.contains(":smile:"))
+    }
+}
+
 @Suite("SwiftMarkdownParser")
 struct ParserTests {
     let parser = SwiftMarkdownParser()
