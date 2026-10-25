@@ -19,6 +19,13 @@
   --writ-mono-font: "SF Mono", "JetBrains Mono", "Menlo", monospace;
   --writ-content-max: 78ch;
   --writ-line-height: 1.55;
+  /* Base reading size, and the multiplier applied to it. Themes override
+     `--writ-base-font-size`; the PDF export overrides `--writ-font-scale`
+     inside `@media print`. Both `html` and `body` derive from them, so a
+     single declaration scales body copy, `rem` headings and `em` children
+     together. */
+  --writ-base-font-size: 15px;
+  --writ-font-scale: 1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,7 +52,7 @@ html, body {
   background: var(--writ-bg);
   color: var(--writ-fg);
   font-family: var(--writ-body-font);
-  font-size: 15px;
+  font-size: calc(var(--writ-base-font-size) * var(--writ-font-scale));
   line-height: var(--writ-line-height);
   -webkit-font-smoothing: antialiased;
 }

@@ -21,7 +21,7 @@ final class PreferencesWindowController: NSWindowController {
     private let lineHeightSlider = NSSlider(value: 1.25, minValue: 1.0, maxValue: 1.5, target: nil, action: nil)
     private let lineHeightValueLabel = NSTextField(labelWithString: "1.25×")
     private let paperSizePopup = NSPopUpButton()
-    private let pdfFontScaleSlider = NSSlider(value: 85, minValue: 60, maxValue: 100, target: nil, action: nil)
+    private let pdfFontScaleSlider = NSSlider(value: 85, minValue: 50, maxValue: 100, target: nil, action: nil)
     private let pdfFontScaleValueLabel = NSTextField(labelWithString: "85 %")
     private let previewThemePopup = NSPopUpButton()
     private let customCSSButton = NSButton(title: "Choose…", target: nil, action: nil)
@@ -131,7 +131,7 @@ final class PreferencesWindowController: NSWindowController {
 
         pdfFontScaleSlider.translatesAutoresizingMaskIntoConstraints = false
         pdfFontScaleSlider.isContinuous = true
-        pdfFontScaleSlider.numberOfTickMarks = 9   // 60, 65, 70, …, 100
+        pdfFontScaleSlider.numberOfTickMarks = 11  // 50, 55, 60, …, 100
         pdfFontScaleSlider.allowsTickMarkValuesOnly = true
         pdfFontScaleSlider.tickMarkPosition = .below
         pdfFontScaleSlider.target = self

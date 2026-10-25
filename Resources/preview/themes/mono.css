@@ -39,7 +39,7 @@
   }
 }
 
-html[data-writ-theme="mono"] body { font-size: 13.5px; }
+html[data-writ-theme="mono"] { --writ-base-font-size: 13.5px; }
 
 html[data-writ-theme="mono"] #writ-content {
   margin: 1.4rem auto 3rem;
