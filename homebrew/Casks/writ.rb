@@ -5,7 +5,7 @@ cask "writ" do
   url "https://github.com/Ceesaxp/Writ.app/releases/download/v#{version}/Writ-#{version}.dmg"
   name "Writ"
   desc "Markdown editor for technical writing"
-  homepage "https://github.com/Ceesaxp/Writ.app"
+  homepage "https://ceesaxp.github.io/writ/"
 
   livecheck do
     url :url
