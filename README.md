@@ -84,27 +84,41 @@ MVP non-goals:
 Writ reads a YAML (`---`) or TOML (`+++`) front-matter block at the top of a
 document. Keys are surfaced to the preview, and `tags` is parsed as a list.
 
-Two keys are *pragmas* — per-document switches for rendering behaviour that
-sometimes fights with the prose you are actually writing. Both are **opt-out**:
-the feature is on unless the key is present and set to `false`.
+Some keys are *pragmas* — per-document switches for rendering behaviour. They
+come in two kinds, and the difference is deliberate.
+
+**Opt-out pragmas** are on unless you turn them off. Both are purely local
+rendering choices, so the safe default is "enabled".
 
 | Pragma | Effect when `false` |
 |---|---|
 | `math: false` | Disables inline `$…$` and block `$$…$$` math extraction, in the preview *and* in editor syntax highlighting. Use it for documents full of currency amounts, where the `$` heuristics misfire. |
 | `emoji: false` | Disables `:shortcode:` → glyph substitution, so `:shrug:` renders literally. Use it for prose that is dense with colons, or when you simply want the text left alone. |
 
+For these, any other value — an absent key, `true`, or something malformed —
+leaves the feature enabled.
+
+**Opt-in pragmas** are off unless you explicitly turn them on, because they
+have a cost beyond rendering.
+
+| Pragma | Effect when `true` |
+|---|---|
+| `plantuml: true` | Renders ```` ```plantuml ```` fences by sending the diagram source to the renderer configured in Settings. **This transmits that part of your document to that server.** Without the pragma — or with no server configured — the fence stays visible as source and nothing leaves your machine. |
+
+Only a literal `true` enables it. An absent key, a malformed value, or `false`
+all mean disabled, and both the pragma *and* a configured endpoint are required
+before any request is made.
+
 ```markdown
 ---
 title: Q3 Pricing
 math: false
 emoji: false
+plantuml: true
 ---
 
 Seats are $40 each, and the :tada: stays as written.
 ```
-
-Any other value — including an absent key, `true`, or something malformed —
-leaves the feature enabled.
 
 ## Architecture
 
@@ -223,10 +237,21 @@ MVP targets include:
 Writ is local-first:
 
 - No account is required
-- No telemetry is included in the MVP
-- No remote rendering services are used by default
-- PlantUML remote servers are out of scope
-- Rendering libraries are bundled for offline use
+- No telemetry is included
+- Math, Mermaid and syntax-highlighting libraries are bundled, so all everyday
+  rendering happens offline
+- **One optional feature can make a network request, and only one.** If you
+  configure a PlantUML renderer URL in Settings *and* a document carries
+  `plantuml: true` in its front matter, the source of that document's
+  ```` ```plantuml ```` fences is POSTed to the URL you chose. Both conditions
+  are required; neither is set by default. Nothing else in Writ contacts the
+  network.
+- No PlantUML engine is bundled, so this feature does nothing until you point
+  it at a server you run (or choose to trust)
+- Diagram responses are passed through Writ's HTML sanitiser before they reach
+  the preview
+- Export (HTML/PDF) never initiates a diagram request; it uses only what the
+  preview has already fetched
 
 ## Documentation
 

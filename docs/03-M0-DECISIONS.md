@@ -71,6 +71,47 @@ A direct `cmark-gfm` integration is deferred — it would shave the AST-walk ove
 
 **Decision per PRD:** recognize fenced ```plantuml blocks; render them as a source `<pre>` with a non-blocking "PlantUML rendering is not configured" notice. No JAR detection, execution, caching, or remote server in MVP. Reconsidered in M4 (P3) per the MVP plan.
 
+**Revised 2026-10-25 — remote-only, opt-in, no bundled engine.** The M0
+decision deferred the question; this settles it.
+
+*Not* bundling an engine. A no-Java path now exists (`@plantuml/core`, PlantUML
+compiled to JavaScript with TeaVM, which the official project moved to after
+abandoning the CheerpJ build), and it works — but the shipped payload is
+~4.6 MB (`plantuml.js` 3.20 MB + `viz-global.js` 1.38 MB for Graphviz layout)
+against a current preview-vendor total of 6.0 MB. That is roughly +76 % on disk
+to serve the ~10 % of diagrams Mermaid does not already cover, in an app whose
+pitch is not being an Electron blob. The JAR path stays rejected for the
+original reasons, which the sandbox makes worse: a JRE, an entitlement to spawn
+it, and user-selected access to both.
+
+*Is* supporting a user-supplied renderer, gated twice: an endpoint URL in
+Settings **and** `plantuml: true` in the document's front matter. Either alone
+does nothing. Default is off on both axes, so the offline behaviour is unchanged
+for anyone who does not opt in.
+
+Protocol, verified empirically against `plantuml-server` running locally:
+`POST <endpoint>` with `Content-Type: text/plain` and the raw source as the body
+returns `200 image/svg+xml`. Kroki documents the same shape, so one code path
+serves both a self-hosted `plantuml-server` (`http://localhost:8080/svg`) and
+Kroki (`https://kroki.io/plantuml/svg`), and **no encoder is needed**. For the
+record, the classic GET form is `/{format}/{encoded}` at the server root, where
+`encoded` is raw DEFLATE plus PlantUML's own 64-character alphabet — not plain
+base64; a `~h<hex>` escape also works but doubles the payload and returns 414
+beyond roughly 3 KB of source. POST avoids all of that.
+
+The fetch happens in Swift, not in the preview JS. The shell loads from
+`file://`, so a JS `fetch` to a local server is cross-origin and
+`plantuml-server` sends no CORS headers — the response could not be read. Doing
+it natively also routes every response through `HTMLSanitizer` and keeps the
+network decision in one auditable place.
+
+Known limitation: the sanitiser strips `<use>` and `<image>` outright. Plain
+diagrams emit neither (verified: sequence diagrams use only
+`svg/g/text/rect/line/title/path/polygon/defs/a` plus `xlink:href`), but
+sprite- or icon-bearing diagrams may, and would then render incomplete. Not
+tested — the standard icon libraries need `!include` over the internet, which
+an offline server cannot fetch.
+
 ## 7. Folder Mode
 
 **Decision per PRD:** single-document MVP. `applicationOpenUntitledFile` returns a fresh document; recent files come from the standard `NSDocumentController`. Folder browsing and quick-open are M3 (P2).

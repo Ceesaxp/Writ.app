@@ -37,6 +37,14 @@ public struct FrontMatter: Sendable {
         self[key]?.lowercased() == "false"
     }
 
+    /// True only when `key` is present and set to `true` (case-insensitive).
+    /// The inverse of `isDisabled` in intent, not in value: an absent key reads
+    /// as *not enabled*, so this suits opt-*in* pragmas where the default must
+    /// be off -- anything with a privacy or network cost.
+    public func isEnabled(_ key: String) -> Bool {
+        self[key]?.lowercased() == "true"
+    }
+
     public init(
         format: Format,
         entries: [(key: String, value: String)],

@@ -52,3 +52,4 @@ Benchmarks/Results/
 # Claude Code local settings
 .claude/settings.local.json
 .claude/data/
+.claude/worktrees/

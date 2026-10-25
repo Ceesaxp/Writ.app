@@ -12,6 +12,17 @@
     mathRenderer: "katex", // 'katex' | 'mathjax' | 'none'; M0 spike toggles
     blocks: new Map(),     // id -> { kind, source, language }
     theme: "auto",
+    // True when the native side is resolving ```plantuml``` fences against
+    // a configured server for this revision. Off by default and off
+    // whenever the feature isn't configured, in which case the fences keep
+    // the emitter's "not configured" notice plus their source.
+    plantUMLEnabled: false,
+    // A resolved-blocks message that arrived before the payload it belongs
+    // to. The native side encodes the payload off the main actor, so a
+    // cache-hit resolve can overtake it; holding the message here instead
+    // of dropping it is what keeps cached diagrams from showing
+    // "Rendering diagram…" forever. See `applyResolvedBlocks`.
+    pendingResolved: null,
   };
 
   // Per-renderer-version cache keyed by kind + source. Bounded LRU.
@@ -216,7 +227,19 @@
         case "mermaid":
           pending.push(renderMermaid(el, block.source));
           break;
-        // plantuml left inline as source per MVP scope
+        case "plantuml":
+          // Deliberately not pushed onto `pending`: PlantUML resolves over
+          // the network, out of band, and the `rendered` signal (which the
+          // HTML/PDF export path waits on) must not wait for a server.
+          // When the feature is off, the element is left exactly as the
+          // emitter produced it.
+          if (state.plantUMLEnabled) {
+            const notice = el.querySelector(".writ-plantuml-notice");
+            // The <pre> source stays visible underneath — it is the
+            // fallback if the render never arrives.
+            if (notice) notice.textContent = "Rendering diagram…";
+          }
+          break;
         default:
           break;
       }
@@ -280,6 +303,32 @@
     ribbon.classList.add("writ-diagnostics-ribbon");
   }
 
+  // Patch blocks the native side resolved out of band (remote PlantUML).
+  // The SVG was sanitised natively before it was sent.
+  function applyResolvedBlocks(msg) {
+    try {
+      if (!msg || typeof msg !== "object") return;
+      // Older than what's on screen: the document has moved on, drop it.
+      if (msg.revision < state.revision) return;
+      // Newer than what's on screen: the payload it belongs to is still
+      // being encoded off the main actor and will arrive in a moment.
+      // Hold it rather than drop it — otherwise a cache hit, which answers
+      // in microseconds, loses the race with its own payload every time.
+      if (msg.revision > state.revision) {
+        state.pendingResolved = msg;
+        return;
+      }
+      const resolved = msg.resolved || {};
+      Object.keys(resolved).forEach(function (id) {
+        const el = document.querySelector('[data-writ-block="' + id + '"]');
+        if (!el) return;
+        el.innerHTML = resolved[id];
+      });
+    } catch (e) {
+      send({ type: "console", level: "error", message: "applyResolvedBlocks: " + e });
+    }
+  }
+
   function applyUpdate(payload) {
     try {
       if (!payload || typeof payload !== "object") return;
@@ -288,6 +337,7 @@
       state.blocks.clear();
       (payload.blocks || []).forEach(function (b) { state.blocks.set(b.id, b); });
       if (payload.theme) setTheme(payload.theme);
+      state.plantUMLEnabled = payload.plantUMLEnabled === true;
 
       // Drop any previous diagnostics ribbon — it'll be rebuilt by
       // attachImageDiagnostics / renderTechnicalBlocks if errors recur.
@@ -319,6 +369,15 @@
         send({ type: "console", level: "error", message: "renderTechnicalBlocks: " + e });
         blocksPromise = Promise.resolve();
       }
+      // A resolve that overtook this payload (a cache hit on the native
+      // side) parked itself in `state.pendingResolved`; now that the DOM
+      // for its revision exists, apply it.
+      const parked = state.pendingResolved;
+      state.pendingResolved = null;
+      if (parked && parked.revision === payload.revision) {
+        applyResolvedBlocks(parked);
+      }
+
       document.body.classList.remove("writ-loading");
       document.body.classList.add("writ-ready");
       blocksPromise.then(function () {
@@ -424,6 +483,7 @@
   // Public API the native bridge uses.
   window.Writ = {
     update: applyUpdate,
+    applyResolvedBlocks: applyResolvedBlocks,
     setMathRenderer: function (name) {
       if (name === state.mathRenderer) return;
       state.mathRenderer = name;
