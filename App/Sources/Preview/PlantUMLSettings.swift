@@ -24,11 +24,27 @@ enum PlantUMLSettings {
 
     static let endpointDefaultsKey = "WritPlantUMLEndpoint"
 
+    /// Posted when ``endpointURLString`` actually changes.
+    ///
+    /// `PreviewBridge` observes this and re-renders the open document, so
+    /// configuring (or clearing) the endpoint takes effect immediately
+    /// instead of waiting for the next edit. Same shape as
+    /// `PreviewAppearance.didChange`, for the same reason.
+    static let didChange = Notification.Name("org.ceesaxp.Writ.PlantUMLSettings.didChange")
+
     /// The endpoint as the user typed it. An empty string means the
     /// feature is off, which is the default.
     static var endpointURLString: String {
         get { UserDefaults.standard.string(forKey: endpointDefaultsKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: endpointDefaultsKey) }
+        set {
+            // Only a real change is announced. The settings UI writes this
+            // on every commit — including a Test button press that typed
+            // nothing new — and each announcement costs a re-render of
+            // every open document.
+            guard newValue != endpointURLString else { return }
+            UserDefaults.standard.set(newValue, forKey: endpointDefaultsKey)
+            NotificationCenter.default.post(name: PlantUMLSettings.didChange, object: nil)
+        }
     }
 
     /// The configured endpoint, or `nil` when unset or unusable.

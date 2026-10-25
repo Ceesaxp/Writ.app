@@ -32,12 +32,19 @@ final class PreferencesWindowController: NSWindowController {
     private let plantUMLStatusLabel = NSTextField(labelWithString: "")
     private let defaultLayoutPopup = NSPopUpButton()
 
+    /// Content width every row is laid out against. The window has no
+    /// `.resizable` mask, so AppKit sizes it to the content view's
+    /// `fittingSize` and this number only holds if no row demands more:
+    /// a label pinned to both margins must either fit or be told to wrap
+    /// (`preferredMaxLayoutWidth`) / truncate (lowered compression
+    /// resistance), or it widens the whole window to its one-line width.
+    private static let contentWidth: CGFloat = 460
+    /// Leading/trailing margin shared by every row.
+    private static let margin: CGFloat = 20
+
     init() {
-        // Wider than the other rows need: the PlantUML endpoint field has
-        // to show a whole URL next to a standard-width row label, and
-        // taller for the three rows that row brings with it.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 778),
+            contentRect: NSRect(x: 0, y: 0, width: Self.contentWidth, height: 635),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -175,6 +182,12 @@ final class PreferencesWindowController: NSWindowController {
         customCSSLabel.textColor = .secondaryLabelColor
         customCSSLabel.lineBreakMode = .byTruncatingMiddle
         customCSSLabel.maximumNumberOfLines = 1
+        // Truncating is not enough on its own: without lowered compression
+        // resistance the label still reports the full untruncated path as
+        // its intrinsic width, and this window has no `.resizable` mask, so
+        // AppKit would size it to fit. A long chosen path would widen the
+        // whole window -- the same defect the PlantUML explanation had.
+        customCSSLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let plantUMLHeading = NSTextField(labelWithString: "PlantUML renderer:")
         plantUMLHeading.translatesAutoresizingMaskIntoConstraints = false
@@ -186,26 +199,42 @@ final class PreferencesWindowController: NSWindowController {
         plantUMLEndpointField.placeholderString = "http://localhost:8080/svg"
         plantUMLEndpointField.target = self
         plantUMLEndpointField.action = #selector(plantUMLEndpointDidCommit(_:))
+        // The field spans the row, so its width comes from the margins, not
+        // from its text. Without this a long pasted URL would out-vote the
+        // window's width and stretch the whole sheet to fit on one line.
+        plantUMLEndpointField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         plantUMLTestButton.translatesAutoresizingMaskIntoConstraints = false
         plantUMLTestButton.bezelStyle = .rounded
         plantUMLTestButton.target = self
         plantUMLTestButton.action = #selector(testPlantUMLEndpoint(_:))
+        // Pins the split between field and button: the button takes exactly
+        // its title's width and the field gets the whole remainder.
+        plantUMLTestButton.setContentHuggingPriority(.required, for: .horizontal)
 
         plantUMLStatusLabel.translatesAutoresizingMaskIntoConstraints = false
         plantUMLStatusLabel.font = NSFont.systemFont(ofSize: 11)
         plantUMLStatusLabel.textColor = .secondaryLabelColor
         plantUMLStatusLabel.lineBreakMode = .byTruncatingTail
         plantUMLStatusLabel.maximumNumberOfLines = 1
+        // A long "Failed — …" message must truncate, which is what the line
+        // break mode above asks for; left at the default it would instead
+        // widen the window until the message fit.
+        plantUMLStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Says plainly what setting this costs: it is the one feature in
         // Writ that sends document content off the machine.
-        let plantUMLExplanation = NSTextField(labelWithString: "Leave empty to disable PlantUML rendering. When set, the source of ```plantuml fences is sent to that server, and only from documents that also carry `plantuml: true` in their front matter.")
+        let plantUMLExplanation = NSTextField(labelWithString: "Leave empty to disable PlantUML rendering. When set, the contents of plantuml code blocks are sent to this server \u{2014} and only from documents whose front matter sets plantuml: true.")
         plantUMLExplanation.translatesAutoresizingMaskIntoConstraints = false
         plantUMLExplanation.font = NSFont.systemFont(ofSize: 11)
         plantUMLExplanation.textColor = .secondaryLabelColor
         plantUMLExplanation.lineBreakMode = .byWordWrapping
         plantUMLExplanation.maximumNumberOfLines = 3
+        // Without this the label reports the width of the whole sentence on
+        // one line (≈990pt) as its intrinsic size, and since the window is
+        // sized to its content's fitting size, that alone stretched the
+        // Settings window to ~1030pt however narrow `contentWidth` was.
+        plantUMLExplanation.preferredMaxLayoutWidth = Self.contentWidth - 2 * Self.margin
 
         let defaultLayoutLabel = NSTextField(labelWithString: "Default layout:")
         defaultLayoutLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -369,15 +398,19 @@ final class PreferencesWindowController: NSWindowController {
             plantUMLHeading.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
             plantUMLHeading.widthAnchor.constraint(equalTo: byteLabel.widthAnchor),
 
-            plantUMLEndpointField.centerYAnchor.constraint(equalTo: plantUMLHeading.centerYAnchor),
-            plantUMLEndpointField.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
-            plantUMLEndpointField.widthAnchor.constraint(equalToConstant: 300),
+            // A URL needs more room than the value column has, so this row
+            // spends vertical space instead of horizontal: the field sits on
+            // its own line under the heading and spans the full width, the
+            // way the custom-CSS row above it already does.
+            plantUMLEndpointField.topAnchor.constraint(equalTo: plantUMLHeading.bottomAnchor, constant: 6),
+            plantUMLEndpointField.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
+            plantUMLEndpointField.trailingAnchor.constraint(equalTo: plantUMLTestButton.leadingAnchor, constant: -8),
 
-            plantUMLTestButton.centerYAnchor.constraint(equalTo: plantUMLHeading.centerYAnchor),
-            plantUMLTestButton.leadingAnchor.constraint(equalTo: plantUMLEndpointField.trailingAnchor, constant: 8),
+            plantUMLTestButton.centerYAnchor.constraint(equalTo: plantUMLEndpointField.centerYAnchor),
+            plantUMLTestButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Self.margin),
 
             plantUMLStatusLabel.topAnchor.constraint(equalTo: plantUMLEndpointField.bottomAnchor, constant: 4),
-            plantUMLStatusLabel.leadingAnchor.constraint(equalTo: byteField.leadingAnchor),
+            plantUMLStatusLabel.leadingAnchor.constraint(equalTo: byteLabel.leadingAnchor),
             plantUMLStatusLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
             plantUMLExplanation.topAnchor.constraint(equalTo: plantUMLStatusLabel.bottomAnchor, constant: 6),
