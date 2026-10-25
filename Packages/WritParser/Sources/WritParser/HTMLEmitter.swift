@@ -22,10 +22,15 @@ struct HTMLEmitter: MarkupWalker {
     /// children so we don't double-link the same span (the parent
     /// `<a>` already wraps them).
     private var insideLink = false
+    /// Per-document opt-out: front-matter `emoji: false` disables
+    /// `:shortcode:` substitution for documents whose prose is heavy
+    /// with colons. Resolved once here rather than per text node.
+    private let emojiEnabled: Bool
 
     init(mathBlocks: [MathPreprocessor.Extracted], frontMatter: FrontMatter? = nil) {
         self.mathBlocks = mathBlocks
         self.frontMatter = frontMatter
+        self.emojiEnabled = !(frontMatter?.isDisabled("emoji") ?? false)
     }
 
     mutating func visit(_ document: Document) -> String {
@@ -231,11 +236,13 @@ struct HTMLEmitter: MarkupWalker {
         switch markup {
         case let text as Text:
             // Post-process the text: substitute `:shortcode:` emoji
-            // and autolink bare URLs. Autolinking is suppressed when
-            // we're inside a `Link` already (`insideLink == true`) so
-            // we don't double-wrap.
+            // and autolink bare URLs. Emoji substitution is skipped
+            // when the document opted out via front matter. Autolinking
+            // is suppressed when we're inside a `Link` already
+            // (`insideLink == true`) so we don't double-wrap.
             InlineTextTransform.emit(
                 text: text.string,
+                allowEmoji: emojiEnabled,
                 allowAutolink: !insideLink,
                 into: &out,
                 escape: Self.escape
