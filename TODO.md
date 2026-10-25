@@ -374,6 +374,71 @@ The headline minor-version bump. Closes the last two issues on the
       lands on block starts; fractional-position interpolation is a
       possible follow-up polish.
 
+## 0.6.0 — block (rectangular) selection
+
+BBEdit/Zed-style column selection. ⌥-drag, or ⌥⇧↑/↓ to start a block and
+⌥⇧←/→ to widen a live one; `Esc` drops it. Typing replaces every row's
+fragment, and a zero-width block inserts at N carets at once — which is
+the point of the feature: turning N lines into a list, adding `|` borders
+to a table, stripping a column of leading junk. Design, the measured
+AppKit behaviour it rests on, and the manual checklist are in
+`docs/06-BLOCK-SELECTION.md`.
+
+113 tests (57 new), manual checklist §8 passed in full, app builds without
+warnings.
+
+- [x] **Pure model** — `BlockSelection`, `LineIndex`, `BlockEdit`:
+      fragments, copy string, and replacement / paste / backspace /
+      forward-delete edit plans. AppKit-free so it tests hostlessly.
+- [x] **The block cannot live in `selectedRanges`** — AppKit collapses
+      multiple empty ranges to one and silently drops the empty members of
+      a mixed set (`NSTextView.h` documents it; a spike confirmed it). The
+      view owns the state and uses `selectedRanges` only to render the
+      non-empty rows, drawing its own carets for the rest. The multi-range
+      *edit* API does accept empty ranges, which is the only reason
+      N-caret editing is possible at all.
+- [x] **Grapheme safety** — fragment edges snap outward to whole composed
+      character sequences and carets snap to the grapheme start, both
+      clamped to their own line. A rectangle applies one column number to
+      every row, so a valid boundary on one line can be the midpoint of a
+      surrogate pair on the next; without the snap `replaceCharacters`
+      writes invalid UTF-16 into the document. The line clamp is
+      load-bearing too — Foundation joins a `\n` to a combining mark that
+      *follows* it, so an unclamped snap at column 0 reaches onto the line
+      above.
+- [x] **Hit-testing via `characterIndexForInsertion(at:)`** — the
+      lower-level `characterIndex(for:in:fractionOf…)` returns a line's own
+      end with `fraction == 1.0`, so the conventional
+      `fraction >= 0.5 ? index + 1 : index` rounding lands on the *next*
+      line's column 0 and dragging right drifts a line down.
+- [x] **Two drop choke points** rather than enumerating every path that
+      can invalidate the block, with `doCommand(by:)` defaulting to drop.
+      The storage choke point filters on `.editedCharacters`: the syntax
+      highlighter re-styles the document as a separate attribute-only pass
+      ~80 ms after every edit, so dropping on attribute edits would make
+      the rectangle silently vanish a moment after each keystroke —
+      invisible to a test, certain in the app.
+- [x] **Headless NSTextView harness** — `App/Tests/WritTextViewHarness.swift`.
+      The M1 item above recorded app-level NSTextView tests as blocked by a
+      Swift 6 / executable-host conflict; the blocker was the test *host*,
+      not the bundle. The harness runs the production view on the
+      production TextKit 1 stack in an off-screen window with no run loop.
+      Note for anyone extending it: `NSTextView.mouseDown` runs a modal
+      event-tracking loop and hangs a test process, and a synthetic
+      mouse-up does not rescue it — drive the keyboard through
+      `doCommand(by:)` instead.
+
+Known limitations, all recorded in `docs/06-BLOCK-SELECTION.md` §7: a block
+through a soft-wrapped line covers its first visual row only (logical
+lines, as BBEdit does — it disables rectangular selection under wrap
+entirely); tabs and wide glyphs make the rectangle geometrically ragged;
+no space padding past end-of-line; undo restores the text but not the
+rectangle; the head row's caret may blink where the others are solid,
+since AppKit draws its own indicator above `draw(_:)`.
+
+- [ ] ⌥-double-click collapses to a plain caret instead of selecting a
+      word (known rough edge)
+
 ## 0.5.6 — PDF export crash fixes
 
 - [x] **PDF export killed the app from a background thread** (reported
@@ -496,30 +561,3 @@ The headline minor-version bump. Closes the last two issues on the
       Verified: 20 consecutive switches across every Source/Split/Preview
       combination leave the frame byte-identical. The outline sidebar
       still grows the window by its own width, which is intended.
-
----
-
-## Block (rectangular) selection — code complete, awaiting manual pass
-
-BBEdit/Zed-style column selection: ⌥-drag, or ⌥⇧↑/↓ to start a block and
-⌥⇧←/→ to widen a live one. Design and measured AppKit behaviour in
-`docs/06-BLOCK-SELECTION.md`; **the manual checklist is §8 there**.
-
-Branch `feat/block-selection`. 113 tests (57 new), app builds without
-warnings.
-
-- [x] Pure model — `BlockSelection`, `LineIndex`, `BlockEdit`; fragments,
-      copy string, replacement/paste/backspace/forward-delete edit plans
-- [x] Grapheme safety — edges snap outward to whole composed character
-      sequences, carets snap to the grapheme start, both clamped to their
-      own line (Foundation joins a `\n` to a combining mark that follows it)
-- [x] Headless NSTextView harness — `App/Tests/WritTextViewHarness.swift`.
-      This is what the M1 item above recorded as blocked; the blocker was
-      the test *host*, not the bundle
-- [x] View state, edit interception, drop rules at the two choke points
-- [x] Keyboard path + hit-testing
-- [x] ⌥-drag tracking loop + carets for the rows AppKit won't draw
-- [ ] **Manual pass against `docs/06-BLOCK-SELECTION.md` §8** — the drag
-      loop and the caret drawing have no automated cover
-- [ ] ⌥-double-click collapses to a caret instead of selecting a word
-      (known rough edge, §7)
