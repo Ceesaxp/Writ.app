@@ -60,7 +60,7 @@ swift run --configuration release writ-bench \
   "$(pwd)/Results/m0-parser.json"
 ```
 
-## Re-measure 2026-10-25 — the gate no longer holds
+## Re-measure 2026-10-25 — the gate broke (and was fixed the same day)
 
 Host: macOS 27.2, Apple Silicon. Same `--configuration release`, same
 `writ-bench`, and **byte-identical fixtures** (`git diff f62d678 HEAD --
@@ -146,16 +146,87 @@ work finds nothing. This is also why the cost tracks document *size* and not
 block density, and why `code-heavy` and `mermaid-heavy` barely move: their
 text volume is small.
 
-The emoji pass contributes a second, smaller cost — `1mb.md` has 403 colons,
-so `EmojiShortcodes.substitute` rebuilds the whole string via `Character`
-iteration rather than returning early.
+**Second mechanism — the one that made the cost super-linear.** The scan
+above is strictly linear, so it cannot explain cost-per-byte doubling from
+1 MB to 5 MB. `fc438ca` also changed the emitter's `Text` case from
 
-**Fix shape** (not yet applied): compare UTF-16 code units in place against
-precomputed `[UInt16]` needles with an inline ASCII case-fold — no bridging,
-no substring, no `lowercased()`. Better still, cheap-reject on the first
-code unit (`h`/`H`/`w`/`W`) before probing at all, which skips the large
-majority of positions. Also minor: the trailing-`)` trim runs two full
-`url.filter` passes per removed character.
+```swift
+out.append(escape(text.string))                     // cae9d46
+```
+
+to a call passing the output buffer `inout` *and* the escape function as a
+closure argument:
+
+```swift
+InlineTextTransform.emit(text: text.string, allowAutolink: !insideLink,
+                         into: &out, escape: escape)   // fc438ca
+```
+
+`HTMLEmitter` is a **struct** and `out` is one of its stored properties, so
+`escape: escape` — a reference to an *instance* method — builds a partial
+application that captures a **copy of `self`**, and that copy holds a second
+reference to `out`'s storage. The buffer is therefore no longer uniquely
+referenced, and every `out.append(…)` inside `emit` deep-copies the entire
+accumulated HTML. One full copy of the output per inline `Text` node, i.e.
+**O(n²) in document length**: ~10 K nodes against a 1.37 MB output for
+`1mb.md`, ~51 K nodes against 6.9 MB for `5mb.md`.
+
+`escape` reads no instance state, so making it `static` removes the capture
+and restores in-place appends. This is why the 5 MB fixture was hit so much
+harder than 1 MB, and why `code-heavy` / `mermaid-heavy` were nearly
+untouched — few `Text` nodes and a small output.
+
+### Fixed 2026-10-25 — both causes, measured separately
+
+Two structural (behaviour-preserving) commits. All three binaries were run
+back-to-back in one session against byte-identical fixtures, with
+`Benchmarks/Package.resolved` untouched (swift-markdown 0.8.0 throughout):
+
+| Fixture | before | + autolink rewrite | + `static escape` | total |
+|---|---:|---:|---:|---:|
+| `10kb.md` | 5.12 ms | 3.35 ms | **3.55 ms** | 1.44× |
+| `1mb.md` | 561.7 ms | 247.7 ms | **180.4 ms** | **3.11×** |
+| `5mb.md` | 4 848.2 ms | 3 405.8 ms | **905.5 ms** | **5.35×** |
+| `code-heavy.md` | 7.78 ms | 7.30 ms | **7.13 ms** | 1.09× |
+| `math-heavy.md` | 105.1 ms | 104.7 ms | **104.4 ms** | 1.01× |
+| `mermaid-heavy.md` | 2.70 ms | 2.53 ms | **2.53 ms** | 1.07× |
+
+The split is diagnostic in itself: the autolink rewrite is a *linear* win
+(1.37× at both 1 MB and 5 MB), while `static escape` is worth 1.37× at 1 MB
+but **3.76×** at 5 MB — the signature of removing a quadratic term.
+
+**The super-linearity is gone.** `5mb.md` / `1mb.md` is now 5.02×, against
+4.99× at `cae9d46` before either feature existed. It was 8.8× before the fix.
+
+**Parity.** The `html` byte count is identical in all three runs for every
+fixture (`1mb.md` 1 373 605; `5mb.md` 6 910 683), which is the evidence that
+both commits are structural. 73 parser tests pass, zero warnings.
+
+Gate criteria, restored:
+
+| Gate criterion | Budget | Now | Verdict |
+|---|---|---:|---|
+| 1 MB opens to editable state | < 1000 ms | 180 ms parse, > 800 ms headroom | **PASS** |
+| 5 MB editable, main thread unblocked | not blocked | 905 ms, off-main on `PreviewScheduler` | **PASS** |
+| 10 KB preview after debounce | < 500 ms | 3.6 ms | **PASS** |
+
+Residual against the pre-feature baseline (`cae9d46`: 157.7 ms / 786.6 ms) is
+**~15 %**, and that is the cost of the two features themselves rather than a
+regression. It is accounted for: a probe over `1mb.md` split into line-sized
+nodes measures `EmojiShortcodes.substitute` at ~22.6 ms and the rewritten
+`AutolinkExtractor.scan` at ~3.8 ms (finding zero matches), against a 180 ms
+parse. `substitute` has a `guard text.contains(":")` fast path but then
+rebuilds the string `Character` by `Character` whenever *any* colon is
+present, and `1mb.md` has 403 of them. Returning early unless a table lookup
+actually hits would recover most of that ~20 ms; not done, since it is
+feature cost and not regression repair.
+
+Deliberately left alone: the trailing-`)` trim runs two full `url.filter`
+passes per removed character, but only on real matches, of which `1mb.md`
+has none. Also noted, not touched — `InlineTextTransform.swift` has
+`if !url.contains("."), url.count < 4 { … }`, a comma where the comment
+describes an `||`; it is a pre-existing logic bug and fixing it would be a
+behavioural change.
 
 `data-writ-line` was the first suspect and is ruled out — `html` byte counts
 are identical at `cae9d46` and `master`, and
