@@ -46,6 +46,8 @@
 	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>org.ceesaxp.Writ</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -58,6 +60,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSAppTransportSecurity</key>
@@ -67,6 +73,8 @@
 	</dict>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Andrei Popov</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Writ connects to the PlantUML or Kroki server you configure in Settings to render diagrams from your document.</string>
 	<key>NSMainStoryboardFile</key>
 	<string></string>
 	<key>NSPrincipalClass</key>

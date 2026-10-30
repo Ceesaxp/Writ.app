@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Apple's privacy manifest. Every "required reason" API Writ touches has to be
+  declared here with a reason code from Apple's fixed list; an undeclared one
+  can be rejected at upload.
+
+  Writ collects nothing and tracks nobody, so the two data arrays are empty and
+  only the API declarations below carry any content. Each one names the code
+  that justifies it — if that code goes away, so should the entry.
+
+  Deliberately NOT declared, because Writ does not touch them (verified by
+  grep over App/Sources and Packages/*/Sources):
+    - DiskSpace      no volumeAvailableCapacity / systemFreeSize use
+    - SystemBootTime no systemUptime / mach_absolute_time use
+    - ActiveKeyboards no activeInputSources use
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!--
+			  UserDefaults — every app setting: editor font and line height,
+			  preview theme, split positions, the PlantUML endpoint.
+			  CA92.1 = access to the app's own defaults, nothing shared.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!--
+			  File timestamps, read via .contentModificationDateKey in two places:
+			    C617.1  FolderNode/FolderWindowController — the folder browser
+			            shows a relative "modified" column, i.e. the timestamp is
+			            displayed straight to the user.
+			    3B52.1  WritDocument — compares the on-disk modification date to
+			            detect a file changed underneath the editor. That file is
+			            always one the user opened themselves through the open
+			            panel or a drag, which is exactly what 3B52.1 covers.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>3B52.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
