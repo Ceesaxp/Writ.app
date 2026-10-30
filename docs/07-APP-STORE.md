@@ -109,11 +109,16 @@ evidence only once you have seen it return something.
 ### Tools
 
 - Active Apple Developer Program membership.
-- Xcode 26.3 or newer, with command-line tools installed.
-- **Not a beta Xcode.** `xcode-select -p` on this machine currently points at
-  `/Applications/Xcode-beta.app` (Xcode 27.0, build `27A5228h`). Apple rejects
-  App Store uploads built against a beta SDK. Point `xcode-select` at a release
-  Xcode before archiving, and check with `xcodebuild -version`.
+- Xcode 26.3 or newer, with command-line tools installed. Currently
+  **Xcode 27.2 (`27B52`)** at `/Applications/Xcode.app`.
+- **Never a beta Xcode.** Apple rejects App Store uploads built against a beta
+  SDK. This was a real blocker here until 2026-10-30, when the only Xcode
+  installed was `/Applications/Xcode-beta.app` (27.0, `27A5228h`) — a seed
+  build, recognisable by the five-digit-plus-letter suffix. Check before
+  archiving: `xcode-select -p` should not say `Xcode-beta`, and
+  `xcodebuild -version` should not report a seed build number. Note that an
+  Xcode Cloud workflow has its own Xcode selection, so setting it correctly
+  locally does not set it there (§7 Option C).
 - XcodeGen (`brew install xcodegen`) — `Writ.xcodeproj` is generated, not
   committed as the source of truth.
 
@@ -417,6 +422,80 @@ the `.p8` key file. It searches `~/private_keys`, `~/.private_keys` and
 `~/.appstoreconnect/private_keys` for `AuthKey_<ID>.p8`, so the downloaded key
 has to be copied into one of those directories before `--apiKey` will resolve.
 
+### Option C — Xcode Cloud (recommended)
+
+**Why this is the preferred route:** Xcode Cloud signs in the cloud, so it
+needs neither an Apple Distribution certificate, nor a Mac Installer
+Distribution certificate, nor a provisioning profile on the local machine. That
+is the entire §1 *Certificates* blocker, gone. It also archives from a clean
+clone, which is the only way to be sure the thing you upload is what is in git.
+
+Two repository prerequisites, both already in place:
+
+| | | |
+| --- | --- | --- |
+| `ci_scripts/ci_post_clone.sh` | **required** | `Writ.xcodeproj` is gitignored, so a clone has no project to build. The hook installs XcodeGen and generates it. |
+| Shared schemes in `project.yml` | insurance | XcodeGen emitted no scheme before; `xcodebuild` and Xcode each autocreated one per target into `xcuserdata/`, which never reaches a clone. Gridka's Xcode Cloud builds do work without a shared scheme, so this may be unnecessary — but Gridka commits its project, so it is not evidence for Writ's case. Declaring them also pins the archive action to `Release`. |
+
+#### Setting up the workflow
+
+1. `xcodegen generate`, then open `Writ.xcodeproj`.
+2. **Product → Xcode Cloud → Create Workflow** (the Report navigator's *Cloud*
+   tab reaches the same place). Choose the **Writ** product.
+3. **Grant source access.** Xcode asks to connect `Ceesaxp/Writ.app`, which
+   installs the Xcode Cloud GitHub app. This needs admin rights on the
+   repository, and it is a one-time grant per repo.
+4. Xcode proposes a default workflow. Change three parts of it:
+   - **Environment** — pick an explicit *release* Xcode (27.2). Do **not**
+     leave it on a "Latest Beta" option: Apple rejects App Store uploads built
+     against a beta SDK, and the whole point of installing a release Xcode
+     locally was to avoid exactly that.
+   - **Start Conditions** — delete the default *Branch Changes* condition and
+     use **Manual**. A release workflow that fires on every push uploads a
+     build per push, and build numbers are spent permanently whether or not the
+     upload is ever submitted (§6).
+   - **Actions** — one **Archive** action. Scheme **Writ**, configuration
+     **Release**, and **Deployment Preparation: App Store Connect**. That last
+     setting is what makes the archive sign for distribution and upload; an
+     Archive action without it produces a build you cannot submit.
+   - **Post-Actions** — none, for a first submission. The build lands in App
+     Store Connect and gets attached to the version by hand, which is one fewer
+     moving part while establishing that the pipeline works. TestFlight can come
+     later.
+5. Save, then **Product → Xcode Cloud → Start Build**.
+
+#### Reading the build log
+
+`ci_post_clone.sh` prints the XcodeGen generation and then the two numbers the
+build will carry:
+
+```
+MARKETING_VERSION = 0.7.0
+CURRENT_PROJECT_VERSION = 34
+```
+
+Check those *first*, before anything else in the log. They are deliberately
+printed early because this is the last cheap moment to notice a wrong version —
+after the upload, that version train is closed in App Store Connect and no
+later build of the same number can replace it.
+
+#### The build-number trap
+
+`CURRENT_PROJECT_VERSION` is a static value in `project.yml`, so **two Xcode
+Cloud runs of the same commit upload the same build number**, and the second is
+rejected. Xcode Cloud exposes an incrementing `$CI_BUILD_NUMBER` that a
+`ci_pre_xcodebuild.sh` hook could patch in, but that makes the uploaded build
+number disagree with the repository, which is its own kind of confusion.
+Gridka chose the other way — bump by hand, commit the bump, and skip numbers
+freely when in doubt (`045faff`, `567d167`). Writ follows Gridka here. Bump
+`CURRENT_PROJECT_VERSION` before every upload attempt, not every release.
+
+#### What Xcode Cloud does not do
+
+Signing and building only. The App Store Connect version record must already
+exist at the matching version number, and the listing's metadata, screenshots,
+price and privacy answers are all still manual.
+
 ### Before submitting
 
 Run the sandboxed App Store build locally first, from `/Applications`, and walk
@@ -440,16 +519,29 @@ one you remember submitting.
 
 ### "Invalid toolchain" / beta SDK rejection
 
-Built with a beta Xcode. `xcode-select -p` on this machine points at
-`/Applications/Xcode-beta.app`; switch it to a release Xcode and rebuild
-(§1).
+Built with a beta Xcode. Check `xcode-select -p` for an `Xcode-beta` path and
+`xcodebuild -version` for a seed build number, switch to a release Xcode and
+rebuild (§1). If the build came from Xcode Cloud, the Xcode version is set in
+the workflow's *Environment*, not by `xcode-select` — a local fix does not
+reach it.
 
 ### "Missing privacy manifest" / undeclared required-reason API
 
-`PrivacyInfo.xcprivacy` does not exist yet. See §1 — it needs the
-`FileTimestamp` (`C617.1`) and `UserDefaults` (`CA92.1`) declarations, and
-`project.yml` must list it as a resource. Gridka hit this and keeps the same
-entry in its own troubleshooting list.
+`App/Resources/PrivacyInfo.xcprivacy` exists and `project.yml` lists it as a
+resource, so the likely cause is that it did not reach the bundle rather than
+that it is missing from the repository. Check the archive, not the source
+tree:
+
+```sh
+ls build/Writ-AppStore.xcarchive/Products/Applications/Writ.app/Contents/Resources/PrivacyInfo.xcprivacy
+```
+
+If that path is absent, the resources build phase lost it — most likely a
+`project.yml` edit dropped the `App/Resources/PrivacyInfo.xcprivacy` sources
+entry, since a stale `Writ.xcodeproj` is impossible here (`xcodegen generate`
+runs first in every path). If the file is present, the complaint is about its
+*contents*: an API Writ calls without a matching declaration. §1 lists what is
+declared and what is deliberately not.
 
 ### Code signing errors on export
 
@@ -486,16 +578,25 @@ are the `writ-doc://` scheme handler resolving an image path outside the
 document's directory, and the app-scope bookmark for a folder opened with
 ⇧⌘O going stale.
 
+## Decisions
+
+- **Price: free**, with no in-app purchase. The Homebrew cask stays as an
+  alternative install route rather than the recommended one.
+- **The mini-site leads with the App Store.** The hero CTA becomes the App
+  Store; the DMG and `brew install --cask writ` move to secondary position. Not
+  yet done — it lives in the separate `ceesaxp.github.io` repository, so it is
+  its own pull request, and it should not land before the listing is live or the
+  CTA points at a page that does not exist.
+- **First App Store version: 0.7.0**, matching the Developer ID release of the
+  PlantUML work. See §6.
+- **Bundle ID stays `org.ceesaxp.Writ`.** See §1 *App ID* for why renaming it
+  would have cost every existing user their container.
+
 ## Open questions for the owner
 
-1. **A release Xcode has to be installed.** The only Xcode on the build machine
-   is `/Applications/Xcode-beta.app` (27.0, `27A5228h`), and Apple rejects App
-   Store uploads built against a beta SDK. This blocks the App Store channel
-   outright — the Developer ID channel is unaffected, so 0.7.0 can ship to
-   Homebrew before this is resolved. See §1 *Tools* and §8.
-2. **Does the App Store listing change the mini-site?** The hero CTA currently
-   points at the DMG. Two channels means deciding whether the App Store badge
-   leads, follows, or sits beside it.
-3. **Price.** Free, paid, or free with no in-app purchase. This has to be set
-   before the listing can be submitted, and it interacts with whether the
-   Homebrew cask stays the recommended install route.
+1. **Bump `MARKETING_VERSION` to 0.7.0 before any App Store archive.** The App
+   Store Connect version record is set to 0.7.0, but `project.yml` still reads
+   `0.6.0`, and the generated project reflects `project.yml` — which is why
+   Xcode's General tab shows 0.6.0 and will keep showing it until the release
+   bump lands. Archiving before then uploads 0.6.0 and closes that train
+   permanently (§6).
