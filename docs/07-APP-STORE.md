@@ -604,6 +604,52 @@ Download the build's artifacts and read
 before changing any setting — every other step in this entry is guesswork until
 that log is read.
 
+#### The cause here: a local certificate is invisible to cloud signing
+
+The log said:
+
+```
+error: exportArchive No signing certificate "Developer ID Application" found
+  No "Developer ID Application" signing certificate matching team ID
+  "Q34D9AYJ95" with a private key was found.
+```
+
+**"with a private key" is the operative phrase.** The team *does* have a
+Developer ID Application certificate — `security find-identity -v -p codesigning`
+lists it on the release Mac, and `make-release.sh` signs the DMG with it every
+release. But it was created on that Mac, so its private key is in that login
+keychain and nowhere else. Xcode Cloud signs on Apple's hardware and can only
+use a certificate whose key it holds, meaning a cloud-managed one. A perfectly
+valid local certificate is invisible to it, which is why the error can look
+absurd while being accurate.
+
+Two ways out, and for Writ the first is usually right:
+
+1. **Do not export for Developer ID at all.** Writ's Developer ID artifact is
+   the notarized DMG, built locally by `make-release.sh`. If the workflow has a
+   **Notarize** post-action, remove it: notarizing requires a
+   Developer-ID-signed build, so it is the likely reason this export runs. The
+   App Store export does not need it.
+2. **Give Xcode Cloud its own Developer ID certificate.** Under automatic
+   signing Xcode creates one when needed: Settings → Accounts → the team →
+   Manage Certificates → + → Developer ID Application. Only the **Account
+   Holder** can create Developer ID certificates.
+
+> **Do not apply the "revoke the managed certificate" fix below to the local
+> `Developer ID Application: Andrei Popov (Q34D9AYJ95)` certificate.**
+> `make-release.sh` signs every DMG with it, and Developer ID certificates are
+> team-wide and limited in number. Revoking it to clear a cloud-signing error
+> would break the release channel that works in order to fix the one that does
+> not. That advice applies only to certificates whose name contains
+> **"Managed (Xcode Cloud)"**.
+
+A post-build script in Xcode Cloud never receives the signing key, so the DMG
+cannot be built and signed there even once a cloud Developer ID certificate
+exists. Moving the DMG channel into Xcode Cloud is therefore not a small
+change, and is not attempted here.
+
+#### Other reported causes
+
 Three causes reported for exit 70 at the export step, once the log names one:
 
 | Log says | Reported fix |
