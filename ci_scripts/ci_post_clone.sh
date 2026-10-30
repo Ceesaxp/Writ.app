@@ -26,6 +26,23 @@ brew install xcodegen
 echo "==> Generating Writ.xcodeproj from project.yml..."
 xcodegen generate
 
+# Xcode Cloud runs with automatic dependency resolution DISABLED, so it needs a
+# checked-in resolved file and fails with a resolver error without one. Checked
+# after generating rather than before, because `xcodegen generate` rewrites the
+# project directory this file lives inside — it does preserve the file, and this
+# is what proves it still did.
+RESOLVED="Writ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+echo "==> Checking the resolved package file..."
+if [ ! -f "$RESOLVED" ]; then
+  echo "ERROR: $RESOLVED is missing." >&2
+  echo "  Xcode Cloud cannot resolve dependencies without it and will fail" >&2
+  echo "  with 'a resolved file is required when automatic dependency" >&2
+  echo "  resolution is disabled'. It must be committed: resolve the packages" >&2
+  echo "  in Xcode, then commit the file it writes." >&2
+  exit 1
+fi
+grep -c '"identity"' "$RESOLVED" | xargs -I{} echo "    pins {} package(s)"
+
 # The preview's offline dependencies (KaTeX, MathJax, Mermaid, highlight.js)
 # ARE tracked, so unlike Gridka there is nothing to download here. Assert it
 # rather than assume: if these ever become untracked, the app still builds and

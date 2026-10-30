@@ -74,7 +74,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Check the Xcode project is still committed
+      - name: Check the files Xcode Cloud needs are still committed
         # Writ.xcodeproj is generated from project.yml AND committed, because
         # Xcode Cloud validates the repository before running any hook and
         # refuses one whose project is not at the root ("Project Writ.xcodeproj
@@ -93,11 +93,19 @@ jobs:
         # above) runs `xcodegen generate` first, so no build ever reads the
         # committed project's contents. Only its existence matters.
         run: |
-          if ! git ls-files --error-unmatch Writ.xcodeproj/project.pbxproj >/dev/null 2>&1; then
-            echo "::error::Writ.xcodeproj/project.pbxproj is not tracked by git. Xcode Cloud requires it (see docs/07-APP-STORE.md §7)."
-            exit 1
-          fi
-          echo "Xcode project is committed."
+          status=0
+          for f in \
+            Writ.xcodeproj/project.pbxproj \
+            Writ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "  tracked: $f"
+            else
+              echo "::error::$f is not tracked by git. Xcode Cloud requires it (see docs/07-APP-STORE.md §7)."
+              status=1
+            fi
+          done
+          exit $status
 
       - name: Build (Debug, ad-hoc signed)
         # `xcbeautify --renderer github-actions` formats xcodebuild

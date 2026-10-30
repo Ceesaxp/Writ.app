@@ -36,19 +36,43 @@ xcuserdata/
 # project.yml remains the only source of truth. Do not edit the project in
 # Xcode: General-tab changes are discarded by the next `xcodegen generate`,
 # and they are discarded silently.
+*.xcworkspace/
+
+# Three things inside the generated project are tracked, and the rules below
+# are verbose because git cannot re-include a file whose parent directory is
+# excluded — every level down to each one has to be opened explicitly.
 Writ.xcodeproj/*
 !Writ.xcodeproj/project.pbxproj
 !Writ.xcodeproj/xcshareddata
 Writ.xcodeproj/xcshareddata/*
 !Writ.xcodeproj/xcshareddata/xcschemes
-*.xcworkspace/
+# Xcode Cloud disables automatic dependency resolution, so it requires a
+# checked-in resolved file and fails the build without one:
+#   "a resolved file is required when automatic dependency resolution is
+#    disabled and should be placed at .../xcshareddata/swiftpm/Package.resolved"
+# This is the one file here whose *contents* matter — it pins swift-markdown
+# and swift-cmark. After changing a package dependency, resolve in Xcode and
+# commit the updated file, or cloud builds resolve against stale revisions.
+# `xcodegen generate` preserves it (verified), so the post-clone hook does not
+# destroy it. Note this re-opens a path that `*.xcworkspace/` above excludes,
+# which is why that rule comes first.
+!Writ.xcodeproj/project.xcworkspace
+Writ.xcodeproj/project.xcworkspace/*
+!Writ.xcodeproj/project.xcworkspace/xcshareddata
+Writ.xcodeproj/project.xcworkspace/xcshareddata/*
+!Writ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+Writ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+!Writ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # Swift Package Manager
 .build/
 .swiftpm/
 Packages/*/.build/
 Packages/*/.swiftpm/
+# The local packages' own resolved files stay out: the Xcode build resolves
+# through the workspace file above, which is the authoritative one.
 Package.resolved
+!Writ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # CocoaPods / Carthage (unused but defensive)
 Pods/
