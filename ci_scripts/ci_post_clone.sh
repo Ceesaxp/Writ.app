@@ -12,9 +12,10 @@
 # committed file — the two are not alternatives. The committed copy satisfies
 # the check; regenerating it here is what keeps it from mattering, because a
 # committed generated file can go stale. Gridka's did, and it uploaded version
-# 1.2.1 long after that train had closed in App Store Connect (f8e3203). CI
-# also fails any pull request where the committed project has drifted from
-# project.yml, so there are two independent guards against that failure.
+# 1.2.1 long after that train had closed in App Store Connect (f8e3203).
+# Regenerating here is the whole guard, and it is sufficient: the committed
+# project's contents are read by nothing, because every other build path runs
+# `xcodegen generate` first too.
 set -euo pipefail
 
 cd "$CI_PRIMARY_REPOSITORY_PATH"

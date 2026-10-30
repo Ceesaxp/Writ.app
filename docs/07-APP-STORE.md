@@ -446,8 +446,20 @@ repository check runs before any hook. The equally obvious opposite is to
 commit the project and skip the hook, which is what Gridka did; the committed
 project then went stale and uploaded version 1.2.1 after that train had closed
 (`f8e3203`). Writ does both: the committed project satisfies the check, and the
-hook plus a CI drift check make its contents irrelevant. `project.yml` stays
-the only source of truth.
+hook makes its contents irrelevant. `project.yml` stays the only source of
+truth.
+
+**Do not try to verify that the committed project matches a fresh
+`xcodegen generate`.** It was tried, in this very branch, and reverted the same
+day. It fails for two independent reasons. First, `objectVersion` and
+`preferredProjectObjectVersion` are derived from the *installed Xcode*, so a
+laptop on 27.2 and a CI runner on 26.6 generate different bytes from identical
+input — byte-equality is unattainable, not merely awkward. Second, it guards
+nothing: every build path runs `xcodegen generate` first, so no build ever
+reads the committed project's contents. The only property worth asserting is
+that the file is still tracked, which CI does, because a file nothing appears
+to need is exactly what a later tidy-up deletes — and the breakage would
+surface in Xcode Cloud rather than in CI.
 
 A consequence worth stating plainly, because it is a trap with no error
 message: **never edit the project in Xcode.** A change in the General tab is

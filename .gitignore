@@ -26,9 +26,12 @@ xcuserdata/
 # "Project Writ.xcodeproj does not exist at the root of the repository",
 # exit 66 — and it checks that BEFORE running ci_scripts/ci_post_clone.sh, so
 # the hook cannot stand in for the file. The committed copy exists only to
-# satisfy that check: the hook regenerates it on every cloud build, and CI
-# fails any PR where it has drifted from project.yml, so a stale copy can
-# never reach a build the way it did in Gridka (f8e3203).
+# satisfy that check, and its contents are never read: every build path
+# (make-release.sh, appstore-release.sh, ci_post_clone.sh, CI) runs
+# `xcodegen generate` first, so a stale committed copy cannot reach a build
+# the way it did in Gridka (f8e3203). Do not try to enforce that the
+# committed bytes match a fresh generate — objectVersion is derived from the
+# installed Xcode, so they differ between machines on different versions.
 #
 # project.yml remains the only source of truth. Do not edit the project in
 # Xcode: General-tab changes are discarded by the next `xcodegen generate`,
