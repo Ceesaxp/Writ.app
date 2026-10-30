@@ -502,6 +502,11 @@ instead, regenerate, and commit both.
      **Release**, and **Deployment Preparation: App Store Connect**. That last
      setting is what makes the archive sign for distribution and upload; an
      Archive action without it produces a build you cannot submit.
+     **"Developer ID" is also offered there, and it is the wrong choice** — it
+     is the DMG channel's output, which `Scripts/make-release.sh` already
+     produces locally, and selecting it fails the build (see §8). The two
+     deployment preparations are not interchangeable: one signs for the Store,
+     the other for direct distribution outside it.
    - **Post-Actions** — none, for a first submission. The build lands in App
      Store Connect and gets attached to the version by hand, which is one fewer
      moving part while establishing that the pipeline works. TestFlight can come
@@ -560,6 +565,36 @@ version in the built `Info.plist` before archiving again.
 `CURRENT_PROJECT_VERSION` is at or below a number App Store Connect has already
 seen. Bump it past the highest number ever uploaded, not merely past the last
 one you remember submitting.
+
+### Xcode Cloud: `Export archive for developer-id distribution` fails, exit 70
+
+The workflow's Archive action has **Deployment Preparation** set to *Developer
+ID* instead of *App Store Connect*. The giveaway is in the command Xcode Cloud
+logs, before any error text:
+
+```
+Export archive for developer-id distribution
+... -exportOptionsPlist /Volumes/workspace/ci/developer-id-exportoptions.plist
+```
+
+Exit 70 is an `IDEDistribution` failure, and the cause is that Developer ID
+export needs a Developer ID Application certificate the cloud environment does
+not have. Fix it in the workflow, not the repository: Archive action →
+Deployment Preparation → **App Store Connect**.
+
+Worth understanding rather than just fixing, because the build *succeeds* right
+up to this step. Writ distributes through two channels and only one of them
+belongs in Xcode Cloud. Developer ID is the DMG channel, which
+`Scripts/make-release.sh` builds locally and notarizes with the `writ-notary`
+keychain profile (§2); it needs a certificate that lives on the release Mac. A
+cloud archive prepared for Developer ID is therefore asking the wrong machine
+for the wrong signature.
+
+If the intent really was to move the DMG channel into Xcode Cloud too, that is
+a separate piece of work — it needs the Developer ID certificate available to
+Xcode Cloud and a Notarize post-action — and the real error for it is in the
+`IDEDistributionLogDirectory` artifact the failing step names, not in the step's
+own output.
 
 ### "Invalid toolchain" / beta SDK rejection
 
