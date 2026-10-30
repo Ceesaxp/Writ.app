@@ -166,3 +166,42 @@ targets:
       # PlantUMLSettings gates on FrontMatter (WritParser) and
       # TechnicalBlock (WritCore), so the test bundle needs both.
       - package: WritCore
+
+# Shared schemes, declared rather than left to autocreation.
+#
+# With no `schemes:` block XcodeGen emits no scheme at all, and xcodebuild
+# and Xcode each quietly autocreate one per target into `xcuserdata/` —
+# per-developer, never in the repository. That is why `-scheme Writ` has
+# always worked locally despite `Writ.xcodeproj/xcshareddata/xcschemes/`
+# not existing. It leaves two things to chance that matter once a machine
+# other than this one does the archiving: whether any scheme exists in a
+# fresh clone, and which configuration the archive action picks. Both are
+# pinned here.
+schemes:
+  Writ:
+    build:
+      targets:
+        Writ: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WritTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    # The App Store and DMG scripts both pass `-configuration Release`
+    # explicitly; this makes an archive started from Xcode or Xcode Cloud,
+    # which pass no configuration at all, agree with them.
+    archive:
+      config: Release
+  WritTests:
+    build:
+      targets:
+        WritTests: [test]
+    test:
+      config: Debug
+      targets:
+        - WritTests
