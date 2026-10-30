@@ -430,13 +430,27 @@ Distribution certificate, nor a provisioning profile on the local machine. That
 is the entire §1 *Certificates* blocker, gone. It also archives from a clean
 clone, which is the only way to be sure the thing you upload is what is in git.
 
-Three repository prerequisites, all in place:
+Four repository prerequisites, all in place. Each of the first three was
+discovered by Xcode Cloud failing on it, in this order — the sequence is worth
+keeping, because each failure looks nothing like the next:
 
 | | | |
 | --- | --- | --- |
 | `Writ.xcodeproj` **committed** | **required** | Xcode Cloud validates the repository before accepting a workflow and refuses one whose project is not at the root: `Project Writ.xcodeproj does not exist at the root of the repository`, exit 66. |
 | `ci_scripts/ci_post_clone.sh` | **required** | Regenerates the committed project from `project.yml` on every cloud build, so the committed copy cannot go stale. Also installs XcodeGen. |
+| `Package.resolved` **committed** | **required** | Xcode Cloud runs with automatic dependency resolution **disabled**, and fails with `a resolved file is required when automatic dependency resolution is disabled` unless `Writ.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` is in the repository. It pins `swift-markdown` and `swift-cmark`. |
 | Shared schemes in `project.yml` | insurance | XcodeGen emitted no scheme before; `xcodebuild` and Xcode each autocreated one per target into `xcuserdata/`, which never reaches a clone. Gridka's builds do work without one, but Gridka commits its project, so it is not evidence for Writ's case. Declaring them also pins the archive action to `Release`. |
+
+Two of these are files that nothing in a local workflow needs — local builds
+resolve packages automatically and generate the project on demand. That makes
+them precisely the kind of thing a future tidy-up removes as dead weight, with
+the breakage appearing only in Xcode Cloud. CI therefore asserts both are still
+tracked, and the post-clone hook re-checks the resolved file after generating,
+since `xcodegen generate` rewrites the directory it lives in.
+
+**`Package.resolved` is the only one of the four whose contents matter.** After
+changing a package dependency, resolve in Xcode and commit the updated file, or
+cloud builds keep resolving against the old revisions.
 
 **The first two are not alternatives, and this is the one thing most worth
 understanding here.** The obvious design is to keep the generated project out
