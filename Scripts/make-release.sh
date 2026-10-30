@@ -45,7 +45,7 @@ xcodebuild \
   -exportArchive \
   -archivePath build/Writ.xcarchive \
   -exportPath build/Writ-export \
-  -exportOptionsPlist Scripts/ExportOptions.plist | tail -3
+  -exportOptionsPlist Scripts/ExportOptions-DeveloperID.plist | tail -3
 
 APP=build/Writ-export/Writ.app
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")

@@ -41,6 +41,11 @@ targets:
     sources:
       - path: App/Sources
       - path: App/Resources/Assets.xcassets
+      # Apple's privacy manifest. Copied into the bundle as
+      # Contents/Resources/PrivacyInfo.xcprivacy, where App Store Connect
+      # looks for it at upload.
+      - path: App/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: Resources/preview
         type: folder
         buildPhase: resources
@@ -60,6 +65,22 @@ targets:
         NSSupportsAutomaticTermination: true
         NSSupportsSuddenTermination: false
         NSMainStoryboardFile: ""
+        # --- Mac App Store submission ---
+        # Required: App Store Connect refuses the upload outright if the
+        # category is missing. Writ is a Markdown editor, so "productivity";
+        # Gridka's "utilities" would be wrong here.
+        LSApplicationCategoryType: public.app-category.productivity
+        # actool already injects this from ASSETCATALOG_COMPILER_APPICON_NAME,
+        # but the App Store requires it, so declare it rather than depend on a
+        # build-tool side effect.
+        CFBundleIconName: AppIcon
+        # Writ uses no encryption beyond what macOS itself provides. Declaring
+        # that here skips the export-compliance questionnaire on every single
+        # submission. Must be a real boolean — the string "false" is ignored.
+        ITSAppUsesNonExemptEncryption: false
+        # Shown the first time Writ reaches a diagram server on the local
+        # network, which is only ever one the user pointed it at themselves.
+        NSLocalNetworkUsageDescription: "Writ connects to the PlantUML or Kroki server you configure in Settings to render diagrams from your document."
         # Scoped to local networking only: this permits cleartext HTTP to
         # localhost and `.local` hosts, which a self-hosted PlantUML server
         # or Kroki instance normally is, WITHOUT allowing arbitrary
