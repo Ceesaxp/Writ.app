@@ -126,9 +126,9 @@ installing with `brew`. Both channels build from the same sources and the same
 
 | | Developer ID channel | App Store channel |
 | --- | --- | --- |
-| Driver | `Scripts/make-release.sh` | Xcode Organizer, or a parallel script |
+| Driver | `Scripts/make-release.sh` | `Scripts/appstore-release.sh`, or Xcode Organizer |
 | Signing identity | Developer ID Application | Apple Distribution (+ installer cert) |
-| Export options | `Scripts/ExportOptions.plist`, `method` = `developer-id` | a **separate** plist, `method` = `app-store-connect` |
+| Export options | `Scripts/ExportOptions-DeveloperID.plist`, `method` = `developer-id` | `Scripts/ExportOptions-AppStore.plist`, `method` = `app-store-connect` |
 | Gatekeeper step | `xcrun notarytool` + `stapler`, keychain profile `writ-notary` | none — the App Store reviews and signs |
 | Artifact | signed, notarized `Writ-<version>.dmg` | `.pkg` uploaded to App Store Connect |
 | Downstream | Homebrew cask in `ceesaxp/homebrew-tap`, mini-site CTA | App Store listing |
@@ -304,9 +304,14 @@ math and diagrams, point them at a file in `samples/`.
 ships under through the Developer ID channel. One binary carries one version:
 an App Store listing at `1.0.0` while the Homebrew cask and the mini-site say
 `0.7.0` is a permanent support tax every time someone reports a bug against a
-version number that only exists on one channel. The App Store Connect version
-record was created as `1.0.0` and edited down to `0.7.0` while it was still in
-*Prepare for Submission* with no build attached.
+version number that only exists on one channel.
+
+**Outstanding:** App Store Connect defaults a new app record's first version to
+`1.0.0`, so the record's version has to be set to `0.7.0` by hand. Do it while
+the version is still in *Prepare for Submission* with no build attached, where
+the field is editable — and before uploading, because a build whose
+`CFBundleShortVersionString` is `0.7.0` cannot be attached to a `1.0.0`
+version record.
 
 Current state in `project.yml` — still pre-release, bumped on the
 `release/0.7.0` branch:
@@ -352,11 +357,11 @@ ship, stop — archiving now is what produces the closed-train rejection.
 
 ## 7. Build, archive, and upload
 
-An App Store export needs its own options plist. Create
-`Scripts/ExportOptionsAppStore.plist` beside the existing one — same `teamID`
-and `signingStyle`, `method` set to `app-store-connect`. This is exactly the
-plist Gridka's `scripts/build-release.sh` writes for itself, which also sets a
-`destination` key:
+An App Store export needs its own options plist, and it exists:
+`Scripts/ExportOptions-AppStore.plist`, beside the Developer ID one — same
+`teamID` and `signingStyle`, `method` set to `app-store-connect`. This is
+exactly the plist Gridka's `scripts/build-release.sh` writes for itself, which
+also sets a `destination` key:
 
 - `destination` = `export` (the default) leaves a local `.pkg` you can validate
   before spending a build number. Recommended for the first submission.
@@ -373,29 +378,37 @@ provisioning profile itself and reports signing problems in a readable form.
 3. Product → Archive.
 4. In Organizer: Distribute App → App Store Connect.
 
-### Option B — command line
+### Option B — `Scripts/appstore-release.sh`
 
-Mirrors `make-release.sh`, diverging only at the export step:
+The whole sequence, wrapped:
 
 ```sh
-xcodegen generate
-xcodebuild -project Writ.xcodeproj -scheme Writ -configuration Release \
-  -destination 'platform=macOS' -archivePath build/Writ-appstore.xcarchive archive
-xcodebuild -exportArchive -archivePath build/Writ-appstore.xcarchive \
-  -exportPath build/Writ-appstore \
-  -exportOptionsPlist Scripts/ExportOptionsAppStore.plist
-xcrun altool --validate-app -f build/Writ-appstore/Writ.pkg \
-  -t macos --apiKey "$APP_STORE_API_KEY" --apiIssuer "$APP_STORE_API_ISSUER"
-xcrun altool --upload-app -f build/Writ-appstore/Writ.pkg \
-  -t macos --apiKey "$APP_STORE_API_KEY" --apiIssuer "$APP_STORE_API_ISSUER"
+./Scripts/appstore-release.sh             # archive + export a local .pkg
+./Scripts/appstore-release.sh --validate  # also validate it against Apple
+./Scripts/appstore-release.sh --upload    # also upload to App Store Connect
 ```
 
-Validate before uploading. Validation catches the whole class of metadata and
-entitlement errors without spending a build number.
+It runs `xcodegen generate` first (§6 explains why that is not optional), then
+archives to `build/Writ-AppStore.xcarchive` and exports to
+`build/Writ-AppStore-export`. Those paths are deliberately disjoint from
+`make-release.sh`'s, and the script removes only its own two directories —
+a blanket `rm -rf build` would destroy the Developer ID channel's archive,
+export and signed DMG.
+
+**Validate before uploading.** Validation catches the whole class of metadata
+and entitlement errors without spending a build number, and build numbers are
+the one resource here you cannot get back.
+
+The script deliberately does **not** pass `-allowProvisioningUpdates`, so it
+cannot create certificates in the portal as a side effect of a release. That
+also means it will not bootstrap signing for you — see §1.
 
 `altool` is still present and functional in the current toolchain
 (`xcrun altool --version` reports 27.0.5), and is what Gridka's release script
-calls for both steps.
+calls for both steps. It is, however, the deprecated path: Apple now steers
+submission through Transporter or `-exportArchive` with `destination` set to
+`upload`. Fine for a first submission, worth revisiting if a future Xcode drops
+it — the switch is contained to this one script.
 
 An API key for the non-interactive calls comes from
 [Users and Access → Integrations → Keys](https://appstoreconnect.apple.com/access/api).
