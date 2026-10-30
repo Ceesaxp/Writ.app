@@ -39,19 +39,25 @@ Create them at
 [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/certificates/list),
 then re-run `security find-identity -v -p codesigning` and confirm both appear.
 
-### App ID
+### App ID — done
 
-Developer ID distribution never required a registered App ID, so assume
-`org.ceesaxp.Writ` is **not** registered. The App Store path does require it:
+`org.ceesaxp.Writ` is registered as an explicit App ID with the **App Sandbox**
+capability, and the App Store Connect record is created against it. Writ is a
+single target with no extensions, so one App ID is enough.
 
-1. Go to
-   [Identifiers](https://developer.apple.com/account/resources/identifiers/list)
-   → "+" → App IDs → App.
-2. Bundle ID: **explicit**, `org.ceesaxp.Writ` — this must match
-   `CFBundleIdentifier` in `project.yml` exactly.
-3. Enable the **App Sandbox** capability.
+**Why this ID and not `org.ceesaxp.writ.app`.** Gridka uses the `.app` suffix
+(`org.ceesaxp.gridka.app`) for every channel, and the first App Store Connect
+record for Writ was created the same way. It was deleted and recreated as
+`org.ceesaxp.Writ` instead, because Writ has already shipped under that ID
+since 0.4.x and it is a *sandboxed* app: all of its user data lives in
+`~/Library/Containers/org.ceesaxp.Writ/`. Changing `CFBundleIdentifier` would
+orphan that container for every existing user — preferences reset, the
+app-scope bookmark behind the custom-CSS setting revoked — in exchange for
+nothing. Gridka needed the suffix because it namespaces a Quick Look
+extension; Writ has no extension to namespace.
 
-Writ is a single target with no extensions, so one App ID is enough.
+The rule this leaves behind: **`CFBundleIdentifier` in `project.yml` is load
+bearing for user data, not just for signing.** Do not change it.
 
 ### Entitlements
 
@@ -65,37 +71,40 @@ needed for the App Store:
 | `com.apple.security.files.bookmarks.app-scope` | Re-open a user-chosen file across launches without re-prompting. Used by the custom preview CSS setting (`PreviewTheme.swift` stores a `.withSecurityScope` bookmark). |
 | `com.apple.security.network.client` | **Not** for fetching content — see §5. WebKit's content process will not initialise without it, even for `file://` loads from inside the bundle. |
 
-### Privacy manifest — missing
+### Privacy manifest
 
-There is no `PrivacyInfo.xcprivacy` anywhere in the repository
-(`find . -name 'PrivacyInfo.xcprivacy'` returns nothing). Apple's
-required-reason API rules are documented most firmly for the iOS family, so how
-hard macOS enforcement bites is less certain — but an upload *can* be rejected
-for an undeclared required-reason API, and the precedent next door settles the
-question in practice: Gridka ships `Resources/PrivacyInfo.xcprivacy` and carries
-a "Missing privacy manifest" entry in its own troubleshooting section. Add one.
+`App/Resources/PrivacyInfo.xcprivacy` ships in the bundle at
+`Contents/Resources/PrivacyInfo.xcprivacy`, wired in through `project.yml`'s
+resources build phase. Apple's required-reason API rules are documented most
+firmly for the iOS family, so how hard macOS enforcement bites is less
+certain — but an upload *can* be rejected for an undeclared one, and Gridka
+both ships a manifest and keeps a "Missing privacy manifest" troubleshooting
+entry, which settles it in practice.
 
-Gridka's declares `NSPrivacyAccessedAPICategoryFileTimestamp` (`C617.1`) and
-`NSPrivacyAccessedAPICategoryDiskSpace` (`E174.1`), with empty tracking and
-collected-data arrays. Writ's needs are close but not identical — base it on
-what Writ actually calls:
+What Writ declares, and why:
 
-- `NSPrivacyAccessedAPICategoryFileTimestamp`, reason **`C617.1`** — the folder
-  browser reads `.contentModificationDateKey` (`App/Sources/App/FolderNode.swift`).
-- `NSPrivacyAccessedAPICategoryUserDefaults`, reason **`CA92.1`** — access
-  limited to the app's own defaults. Writ reads and writes `UserDefaults` in
-  seven files under `App/Sources` (preferences, preview theme, PlantUML
-  settings, window state).
-- `NSPrivacyTracking`: `false`, `NSPrivacyTrackingDomains`: empty,
-  `NSPrivacyCollectedDataTypes`: empty. Writ collects nothing.
+| Category | Reasons | Justified by |
+| --- | --- | --- |
+| `UserDefaults` | `CA92.1` | The app's own defaults only: editor font and line height, preview theme, split positions, the PlantUML endpoint. |
+| `FileTimestamp` | `C617.1`, `3B52.1` | `C617.1` — the folder browser displays a relative "modified" column (`FolderNode.swift`, `FolderWindowController.swift`). `3B52.1` — `WritDocument` compares the on-disk modification date to notice a file changed underneath the editor, and that file is always one the user opened themselves. |
 
-Do not copy Gridka's `DiskSpace` entry without checking — nothing in Writ
-appears to query free space, and declaring an API you do not use is its own
-small inaccuracy.
+Deliberately **not** declared, because Writ never calls them: `DiskSpace`,
+`SystemBootTime`, `ActiveKeyboards`. Gridka's manifest declares `DiskSpace`
+(`E174.1`) and omits `UserDefaults` entirely, so it is wrong for Writ in both
+directions — do not copy it.
 
-The file belongs in `App/Resources/` alongside the asset catalog, and
-`project.yml` has to list it as a resource. Both are outside this document's
-scope; treat it as the open task it is.
+**How the `FileTimestamp` entry was nearly missed.** A first pass concluded
+Writ touched no timestamp APIs, on the strength of this:
+
+```sh
+grep -rlE 'contentModificationDate\|modificationDate' --include='*.swift' App/Sources
+```
+
+That matches zero files — not because there are none, but because `-E` reads
+`\|` as an *escaped literal pipe*, so the pattern searched for the single
+string `contentModificationDate|modificationDate`. With real alternation the
+same command finds 15 hits across two files. A grep that returns nothing is
+evidence only once you have seen it return something.
 
 ### Tools
 
@@ -291,12 +300,21 @@ math and diagrams, point them at a file in `samples/`.
 
 ## 6. Version and build numbers
 
-Current state in `project.yml`:
+**The first App Store release is 0.7.0**, the same number the PlantUML work
+ships under through the Developer ID channel. One binary carries one version:
+an App Store listing at `1.0.0` while the Homebrew cask and the mini-site say
+`0.7.0` is a permanent support tax every time someone reports a bug against a
+version number that only exists on one channel. The App Store Connect version
+record was created as `1.0.0` and edited down to `0.7.0` while it was still in
+*Prepare for Submission* with no build attached.
 
-| Setting | Value |
-| --- | --- |
-| `MARKETING_VERSION` | `0.6.0` |
-| `CURRENT_PROJECT_VERSION` | `33` |
+Current state in `project.yml` — still pre-release, bumped on the
+`release/0.7.0` branch:
+
+| Setting | Value | At release |
+| --- | --- | --- |
+| `MARKETING_VERSION` | `0.6.0` | `0.7.0` |
+| `CURRENT_PROJECT_VERSION` | `33` | `34` |
 
 Two rules, both learned the hard way on Gridka:
 
@@ -457,17 +475,14 @@ document's directory, and the app-scope bookmark for a folder opened with
 
 ## Open questions for the owner
 
-1. **Which version number is the first App Store release?** Deliberately not
-   decided here. `v0.6.0` is tagged and already shipped through the Developer
-   ID channel, and `master` carries unreleased work on top of it. Shipping
-   `0.6.0` again on a different channel, cutting `0.6.1`, or opening the App
-   Store at `1.0.0` are all defensible; the choice also fixes which build
-   number train starts (§6).
-2. **Who creates the privacy manifest?** `App/Resources/` and `project.yml` are
-   outside this document's scope, and both need an edit.
-3. **Does the App Store listing change the mini-site?** The hero CTA currently
+1. **A release Xcode has to be installed.** The only Xcode on the build machine
+   is `/Applications/Xcode-beta.app` (27.0, `27A5228h`), and Apple rejects App
+   Store uploads built against a beta SDK. This blocks the App Store channel
+   outright — the Developer ID channel is unaffected, so 0.7.0 can ship to
+   Homebrew before this is resolved. See §1 *Tools* and §8.
+2. **Does the App Store listing change the mini-site?** The hero CTA currently
    points at the DMG. Two channels means deciding whether the App Store badge
    leads, follows, or sits beside it.
-4. **Price.** Free, paid, or free with no in-app purchase. This has to be set
+3. **Price.** Free, paid, or free with no in-app purchase. This has to be set
    before the listing can be submitted, and it interacts with whether the
    Homebrew cask stays the recommended install route.
