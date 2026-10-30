@@ -260,4 +260,5 @@ Writ is local-first:
 - [Technical design](docs/02-TECHNICAL-DESIGN.md)
 - [M0 decisions and baseline](docs/03-M0-DECISIONS.md)
 - [Block (rectangular) selection](docs/06-BLOCK-SELECTION.md)
+- [Mac App Store submission](docs/07-APP-STORE.md)
 - [Implementation TODO](TODO.md)

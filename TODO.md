@@ -678,3 +678,42 @@ cold-export blank (0.5.6), and ⌥-double-click in block selection (0.6.0).
 Correctly deferred per the plan: PlantUML rendering, DOM patching (gated on
 measurement — note the numbers above now argue *for* revisiting it),
 issue #11 workspace/project, issues #23/#24 preview annotations.
+
+---
+
+## App Store preparation — vendor licences + submission guide
+
+- [x] **Vendor licence texts now ship with the app** — Writ bundles KaTeX,
+      MathJax, Mermaid and highlight.js but shipped none of their licence
+      texts: a compliance gap in all three channels (DMG, Homebrew, and the
+      planned App Store build). `Scripts/fetch-vendor.sh` now fetches each
+      one from the same pinned version as the code, into
+      `Resources/preview/vendor/<lib>/LICENSE`, and verifies what came back
+      really is a licence — a CDN that answers a bad path with a styled 200
+      page sails past both `curl --fail` and any size check, so the guard
+      matches on a per-licence identifier instead. `Resources/preview` is a
+      folder resource, so the files ship with no project change. MathJax
+      3.2.2 publishes no `NOTICE`, so Apache-2.0 needs nothing beyond the
+      licence; re-check if the pin moves.
+- [x] **`docs/07-APP-STORE.md`** — submission guide modelled on the one
+      Gridka shipped with. Covers the certificate blocker, the two parallel
+      distribution channels and their separate export-options plists, draft
+      listing metadata, screenshots, review notes for the doubly-opt-in
+      PlantUML path, and the version-train rules Gridka learned the hard way.
+- [ ] **Blocked on two certificates that do not exist yet** — this Mac has
+      only `Developer ID Application`. An App Store build also needs an
+      **Apple Distribution** and a **Mac Installer Distribution**
+      certificate, plus the App ID `org.ceesaxp.Writ` registered with the
+      App Sandbox capability. Developer ID distribution never required a
+      registered App ID, so assume it is not registered.
+- [ ] **No `PrivacyInfo.xcprivacy` exists** — Writ reads and writes
+      `UserDefaults` in seven files under `App/Sources`, a required-reason
+      API, so an upload without a manifest fails validation. Needs
+      `NSPrivacyAccessedAPICategoryUserDefaults` with reason `CA92.1` and
+      empty tracking / collected-data arrays. Belongs in `App/Resources/`
+      and `project.yml` — both outside the scope of this packet.
+- [ ] **First App Store version number is undecided** — `v0.6.0` is tagged
+      and already shipped through the Developer ID channel, and `master`
+      carries unreleased work on top of it. The choice also fixes which
+      build-number train starts. Left as an open question in
+      `docs/07-APP-STORE.md`.
