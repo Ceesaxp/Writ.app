@@ -74,6 +74,33 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Check the committed project matches project.yml
+        # Writ.xcodeproj is generated, and is also committed, because Xcode
+        # Cloud rejects a repository without the project at its root. A
+        # committed generated file can go stale, and when Gridka's did, it
+        # uploaded the wrong version and App Store Connect closed that train
+        # (Gridka f8e3203). The previous step just regenerated the project
+        # from project.yml, so any diff here means the committed copy no
+        # longer matches its source — fail now, in a pull request, rather
+        # than at upload time.
+        #
+        # Defence in depth rather than the primary guard: every build path
+        # (make-release.sh, appstore-release.sh, ci_post_clone.sh, this job)
+        # runs `xcodegen generate` first, so a stale committed project cannot
+        # actually reach a build. What this keeps honest is the repository.
+        #
+        # One way it can fail without anyone having done anything wrong: the
+        # step above installs XcodeGen unpinned, so a release that changes its
+        # output will make the committed project differ from a fresh generate.
+        # The fix is the same either way — regenerate locally and commit.
+        run: |
+          if ! git diff --quiet -- Writ.xcodeproj; then
+            echo "::error::Writ.xcodeproj is out of date. Run 'xcodegen generate' and commit the result."
+            git diff --stat -- Writ.xcodeproj
+            exit 1
+          fi
+          echo "Committed project matches project.yml."
+
       - name: Build (Debug, ad-hoc signed)
         # `xcbeautify --renderer github-actions` formats xcodebuild
         # output for the GitHub Actions log AND surfaces diagnostics

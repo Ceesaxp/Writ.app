@@ -1,15 +1,20 @@
 #!/bin/bash
 # Xcode Cloud post-clone hook.
 #
-# Writ.xcodeproj is NOT in the repository — it is generated from project.yml by
-# XcodeGen, and .gitignore excludes it. So a fresh Xcode Cloud clone contains no
-# Xcode project at all, and without this hook the build fails before it starts.
+# Writ.xcodeproj is generated from project.yml by XcodeGen. It is *also*
+# committed, because Xcode Cloud validates the repository before it will accept
+# a workflow at all and refuses one whose project is not at the root:
 #
-# This is the opposite trade-off from Gridka, which commits its generated
-# project. That let Xcode Cloud build it without a hook, and then bit back:
-# commit f8e3203 fixes a build where the committed project was stale and App
-# Store Connect rejected the upload with "train version 1.2.1 is closed". Not
-# committing the project cannot go stale, but it does make this hook mandatory.
+#   Project Writ.xcodeproj does not exist at the root of the repository
+#   (exit 66)
+#
+# That check runs BEFORE this hook, so the hook cannot substitute for the
+# committed file — the two are not alternatives. The committed copy satisfies
+# the check; regenerating it here is what keeps it from mattering, because a
+# committed generated file can go stale. Gridka's did, and it uploaded version
+# 1.2.1 long after that train had closed in App Store Connect (f8e3203). CI
+# also fails any pull request where the committed project has drifted from
+# project.yml, so there are two independent guards against that failure.
 set -euo pipefail
 
 cd "$CI_PRIMARY_REPOSITORY_PATH"

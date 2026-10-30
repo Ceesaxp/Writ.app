@@ -430,12 +430,30 @@ Distribution certificate, nor a provisioning profile on the local machine. That
 is the entire §1 *Certificates* blocker, gone. It also archives from a clean
 clone, which is the only way to be sure the thing you upload is what is in git.
 
-Two repository prerequisites, both already in place:
+Three repository prerequisites, all in place:
 
 | | | |
 | --- | --- | --- |
-| `ci_scripts/ci_post_clone.sh` | **required** | `Writ.xcodeproj` is gitignored, so a clone has no project to build. The hook installs XcodeGen and generates it. |
-| Shared schemes in `project.yml` | insurance | XcodeGen emitted no scheme before; `xcodebuild` and Xcode each autocreated one per target into `xcuserdata/`, which never reaches a clone. Gridka's Xcode Cloud builds do work without a shared scheme, so this may be unnecessary — but Gridka commits its project, so it is not evidence for Writ's case. Declaring them also pins the archive action to `Release`. |
+| `Writ.xcodeproj` **committed** | **required** | Xcode Cloud validates the repository before accepting a workflow and refuses one whose project is not at the root: `Project Writ.xcodeproj does not exist at the root of the repository`, exit 66. |
+| `ci_scripts/ci_post_clone.sh` | **required** | Regenerates the committed project from `project.yml` on every cloud build, so the committed copy cannot go stale. Also installs XcodeGen. |
+| Shared schemes in `project.yml` | insurance | XcodeGen emitted no scheme before; `xcodebuild` and Xcode each autocreated one per target into `xcuserdata/`, which never reaches a clone. Gridka's builds do work without one, but Gridka commits its project, so it is not evidence for Writ's case. Declaring them also pins the archive action to `Release`. |
+
+**The first two are not alternatives, and this is the one thing most worth
+understanding here.** The obvious design is to keep the generated project out
+of version control and let the post-clone hook produce it — that was the
+original arrangement, and Xcode Cloud rejects it outright, because its
+repository check runs before any hook. The equally obvious opposite is to
+commit the project and skip the hook, which is what Gridka did; the committed
+project then went stale and uploaded version 1.2.1 after that train had closed
+(`f8e3203`). Writ does both: the committed project satisfies the check, and the
+hook plus a CI drift check make its contents irrelevant. `project.yml` stays
+the only source of truth.
+
+A consequence worth stating plainly, because it is a trap with no error
+message: **never edit the project in Xcode.** A change in the General tab is
+discarded by the next `xcodegen generate` — silently, and that generate runs at
+the start of every release script and every cloud build. Change `project.yml`
+instead, regenerate, and commit both.
 
 #### Setting up the workflow
 
