@@ -270,11 +270,37 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     private func applyPersistedSplitFraction() {
         splitController.splitView.layoutSubtreeIfNeeded()
         let split = splitController.splitView
-        let editorItem = splitController.splitViewItems[1]
-        let previewItem = splitController.splitViewItems[2]
-        let editingAreaWidth =
-            editorItem.viewController.view.bounds.width
-            + previewItem.viewController.view.bounds.width
+        // Geometry must come from the split view's *arranged subviews*, not
+        // from `splitViewItems[i].viewController.view`. AppKit wraps each
+        // item's view, so the view controller's own frame is relative to
+        // that wrapper and its `minX` reads 0 wherever the pane actually
+        // sits; and a collapsed item's view keeps its pre-collapse bounds
+        // rather than going to zero. Measured on macOS 27 in a 1101pt split
+        // with a 300pt outline (Scripts-free AppKit probe, 2026-10-31):
+        //
+        //   outline hidden: arranged[1].minX = 0    vc.view.minX = 0
+        //                   arranged[0].width = 300 (stale, isHidden=true)
+        //   outline shown : arranged[1].minX = 300  vc.view.minX = 0
+        //
+        // The previous formula used the *outline item's* bounds width as the
+        // divider's left origin. That is accidentally correct while the
+        // outline is visible (300) and wrong whenever it is collapsed, where
+        // it contributes a stale 300 instead of 0. The outline starts
+        // collapsed, so the restore asked for a divider 300pt too far right,
+        // `minimumThickness = 280` clamped it straight back, and
+        // `setPosition` became a silent no-op that left the preview at
+        // exactly its minimum — the narrow preview, whatever fraction was
+        // stored. Verified: with this origin, fractions 0.30/0.50/0.70 land
+        // at 0.3002/0.5000/0.7000 with the outline hidden and 0.35/0.50 at
+        // 0.3526/0.5000 with it shown (0.3526 is the editor's own 280pt
+        // minimum, not an error in the formula).
+        let arranged = split.arrangedSubviews
+        guard arranged.count >= 3 else {
+            dwcLog.notice("applyPersistedSplitFraction skipped: \(arranged.count) arranged subviews")
+            return
+        }
+        let editorFrame = arranged[1].frame
+        let editingAreaWidth = editorFrame.width + arranged[2].frame.width
         guard editingAreaWidth > 0 else {
             // The gate stays closed on purpose: a split view with no width
             // yet is precisely the state whose resize notifications are
@@ -283,8 +309,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             return
         }
         let fraction = splitFraction.stored
-        let outlineWidth = splitController.splitViewItems[0].viewController.view.bounds.width
-        let dividerOffset = outlineWidth + editingAreaWidth * CGFloat(fraction)
+        let dividerOffset = editorFrame.minX + editingAreaWidth * CGFloat(fraction)
         split.setPosition(dividerOffset, ofDividerAt: 1)
         // `setPosition` posts the resize notification itself, and
         // `minimumThickness` may clamp what it was asked for. Flush that
@@ -292,8 +317,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         // the clamped geometry is persisted and the stored fraction
         // ratchets a little further on every switch.
         split.layoutSubtreeIfNeeded()
-        let achievedEditor = editorItem.viewController.view.bounds.width
-        let achievedPreview = previewItem.viewController.view.bounds.width
+        let achievedEditor = split.arrangedSubviews[1].frame.width
+        let achievedPreview = split.arrangedSubviews[2].frame.width
         dwcLog.notice("applyPersistedSplitFraction fraction=\(fraction, format: .fixed(precision: 4)) editor=\(Double(achievedEditor), format: .fixed(precision: 1)) preview=\(Double(achievedPreview), format: .fixed(precision: 1))")
         // Open the gate one runloop turn later so anything AppKit defers
         // past the synchronous flush is suppressed too. A user cannot drag
