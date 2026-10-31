@@ -23,21 +23,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
     }
 
-    /// UserDefaults-backed divider fraction (editor width / editing-area
-    /// width) for split mode. Replaces `NSSplitView.autosaveName`, which
-    /// crashed on macOS Sequoia when display geometry changed during sleep
-    /// (`-[__NSSetM copy]` from inside `_autosaveSubviewLayoutIfNecessary`,
-    /// reproducer 2026-06-10 wake-up crash).
-    private static let splitFractionDefaultsKey = "WritEditorPreviewSplitFraction"
-    static var editorPreviewSplitFraction: Double {
-        get {
-            let v = UserDefaults.standard.double(forKey: splitFractionDefaultsKey)
-            return v > 0 ? v : 0.5
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: splitFractionDefaultsKey)
-        }
-    }
+    /// Holds the editor/preview divider fraction and decides which resize
+    /// notifications are the user's. Per window: the gate tracks *this*
+    /// window's layout transitions, even though the fraction it reads and
+    /// writes is shared across windows.
+    private let splitFraction = SplitFractionStore()
 
     let editor: EditorViewController
     let preview: PreviewViewController
@@ -74,8 +64,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         split.isVertical = true
         // Deliberately no `autosaveName` — AppKit's NSSplitView autosave
         // path crashes on macOS Sequoia when display configuration changes
-        // during sleep/wake. We persist the divider fraction ourselves via
-        // `editorPreviewSplitFraction` and the resize notification below.
+        // during sleep/wake (`-[__NSSetM copy]` from inside
+        // `_autosaveSubviewLayoutIfNecessary`, reproducer 2026-06-10
+        // wake-up crash). We persist the divider fraction ourselves via
+        // `SplitFractionStore` and the resize notification below.
 
         let outlineItem = NSSplitViewItem(sidebarWithViewController: outline)
         outlineItem.minimumThickness = 180
@@ -159,8 +151,12 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         installToolbar(on: window)
 
         // Persist the editor/preview divider position whenever the split
-        // view changes size, but only while in `.split` mode — otherwise
-        // the collapse animation transiently saves fraction 0 or 1.
+        // view changes size. Two independent gates filter what arrives
+        // here, because this notification says nothing about who caused
+        // the resize: the mode gate in `splitViewDidResize` (only `.split`
+        // shows both panes), and the transition gate inside
+        // `SplitFractionStore` (only once a restore has landed). The mode
+        // gate alone is not enough — see `setLayout`.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(splitViewDidResize(_:)),
@@ -239,10 +235,14 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         let previewItem = splitController.splitViewItems[2]
         let editorWidth = editorItem.viewController.view.bounds.width
         let previewWidth = previewItem.viewController.view.bounds.width
-        let editingAreaWidth = editorWidth + previewWidth
-        guard editingAreaWidth > 0,
-              editorWidth > 0, previewWidth > 0 else { return }
-        Self.editorPreviewSplitFraction = Double(editorWidth / editingAreaWidth)
+        let persisted = splitFraction.splitDidResize(
+            editorWidth: Double(editorWidth),
+            previewWidth: Double(previewWidth)
+        )
+        let attempted = editorWidth + previewWidth > 0
+            ? Double(editorWidth / (editorWidth + previewWidth))
+            : -1
+        dwcLog.notice("splitViewDidResize attempted=\(attempted, format: .fixed(precision: 4)) persisted=\(persisted)")
     }
 
     override func windowDidLoad() {
@@ -261,23 +261,71 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
     }
 
-    /// Place the editor/preview divider at the persisted fraction.
+    /// Place the editor/preview divider at the persisted fraction, then
+    /// hand the gate back to the user.
+    ///
     /// Indices after the outline sidebar was prepended: 0 = outline
     /// (sidebar), 1 = editor, 2 = preview. Divider 1 sits between the
     /// editor and the preview.
     private func applyPersistedSplitFraction() {
         splitController.splitView.layoutSubtreeIfNeeded()
         let split = splitController.splitView
-        let editorItem = splitController.splitViewItems[1]
-        let previewItem = splitController.splitViewItems[2]
-        let editingAreaWidth =
-            editorItem.viewController.view.bounds.width
-            + previewItem.viewController.view.bounds.width
-        guard editingAreaWidth > 0 else { return }
-        let fraction = Self.editorPreviewSplitFraction
-        let outlineWidth = splitController.splitViewItems[0].viewController.view.bounds.width
-        let dividerOffset = outlineWidth + editingAreaWidth * CGFloat(fraction)
+        // Geometry must come from the split view's *arranged subviews*, not
+        // from `splitViewItems[i].viewController.view`. AppKit wraps each
+        // item's view, so the view controller's own frame is relative to
+        // that wrapper and its `minX` reads 0 wherever the pane actually
+        // sits; and a collapsed item's view keeps its pre-collapse bounds
+        // rather than going to zero. Measured on macOS 27 in a 1101pt split
+        // with a 300pt outline (Scripts-free AppKit probe, 2026-10-31):
+        //
+        //   outline hidden: arranged[1].minX = 0    vc.view.minX = 0
+        //                   arranged[0].width = 300 (stale, isHidden=true)
+        //   outline shown : arranged[1].minX = 300  vc.view.minX = 0
+        //
+        // The previous formula used the *outline item's* bounds width as the
+        // divider's left origin. That is accidentally correct while the
+        // outline is visible (300) and wrong whenever it is collapsed, where
+        // it contributes a stale 300 instead of 0. The outline starts
+        // collapsed, so the restore asked for a divider 300pt too far right,
+        // `minimumThickness = 280` clamped it straight back, and
+        // `setPosition` became a silent no-op that left the preview at
+        // exactly its minimum — the narrow preview, whatever fraction was
+        // stored. Verified: with this origin, fractions 0.30/0.50/0.70 land
+        // at 0.3002/0.5000/0.7000 with the outline hidden and 0.35/0.50 at
+        // 0.3526/0.5000 with it shown (0.3526 is the editor's own 280pt
+        // minimum, not an error in the formula).
+        let arranged = split.arrangedSubviews
+        guard arranged.count >= 3 else {
+            dwcLog.notice("applyPersistedSplitFraction skipped: \(arranged.count) arranged subviews")
+            return
+        }
+        let editorFrame = arranged[1].frame
+        let editingAreaWidth = editorFrame.width + arranged[2].frame.width
+        guard editingAreaWidth > 0 else {
+            // The gate stays closed on purpose: a split view with no width
+            // yet is precisely the state whose resize notifications are
+            // AppKit's. The next entry into split restores and opens it.
+            dwcLog.notice("applyPersistedSplitFraction skipped: editingAreaWidth=0, gate stays closed")
+            return
+        }
+        let fraction = splitFraction.stored
+        let dividerOffset = editorFrame.minX + editingAreaWidth * CGFloat(fraction)
         split.setPosition(dividerOffset, ofDividerAt: 1)
+        // `setPosition` posts the resize notification itself, and
+        // `minimumThickness` may clamp what it was asked for. Flush that
+        // layout synchronously while the gate is still closed, otherwise
+        // the clamped geometry is persisted and the stored fraction
+        // ratchets a little further on every switch.
+        split.layoutSubtreeIfNeeded()
+        let achievedEditor = split.arrangedSubviews[1].frame.width
+        let achievedPreview = split.arrangedSubviews[2].frame.width
+        dwcLog.notice("applyPersistedSplitFraction fraction=\(fraction, format: .fixed(precision: 4)) editor=\(Double(achievedEditor), format: .fixed(precision: 1)) preview=\(Double(achievedPreview), format: .fixed(precision: 1))")
+        // Open the gate one runloop turn later so anything AppKit defers
+        // past the synchronous flush is suppressed too. A user cannot drag
+        // the divider within the same turn, so no real resize is lost.
+        DispatchQueue.main.async { [weak self] in
+            self?.splitFraction.restoreDidLand()
+        }
     }
 
     func applyLoadedSource() {
@@ -426,6 +474,26 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         // deliberately *not* covered — growing the window to make room for
         // a sidebar is standard macOS behavior.
         let frameBeforeSwitch = window?.frame
+
+        // Everything the collapse mutation below provokes is AppKit's, not
+        // the user's, so close the transition gate before touching
+        // `isCollapsed`. This replaces an ordering dependency that was
+        // invisible in the diff: the old code relied on `layoutMode = mode`
+        // being assigned *after* the mutation for the mode guard in
+        // `splitViewDidResize` to suppress it, and it is assigned before.
+        // The guard therefore protected split -> source and split ->
+        // preview but stood wide open on entry into split — the one path
+        // that matters. AppKit uncollapses the preview at its 280pt
+        // `minimumThickness`, the resize notification fires, and that
+        // geometry was persisted as the user's fraction; the
+        // `applyPersistedSplitFraction` call below then faithfully
+        // re-applied the value it had just destroyed. For the reporter's
+        // 1101pt window with the outline collapsed and a `.paneSplitter`
+        // divider (~9pt): (1101 - 9 - 280) / (1101 - 9) = 0.7436, and
+        // ~0.743 is what was found persisted on that machine. The bug's
+        // fixed point is the preview pinned at its minimum, which is
+        // exactly the "split proportion is not retained" report.
+        splitFraction.beginTransition()
 
         switch mode {
         case .source:

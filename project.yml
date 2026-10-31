@@ -155,6 +155,7 @@ targets:
         PRODUCT_NAME: WritTests
     sources:
       - path: App/Tests
+      - path: App/Sources/App/SplitFractionStore.swift
       - path: App/Sources/Editor/BlockSelection.swift
       - path: App/Sources/Editor/WritTextView.swift
       - path: App/Sources/Editor/LatencyProbe.swift

@@ -11,6 +11,7 @@
 		0711CCD9EC82EE2620552FDE /* BlockSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F8FAFDA6A8DE6A8DEB0AFAC /* BlockSelectionTests.swift */; };
 		0914C39A34AA98186F002441 /* RecentDocumentsMenuDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0570CDF2A94F7B7C17D1E3 /* RecentDocumentsMenuDelegate.swift */; };
 		0E7A86E10BBA1340625318D6 /* EditorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E186FD7A9A520EC00B5E1CF5 /* EditorViewController.swift */; };
+		16DA4DFDC390F90BC38998AC /* SplitFractionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C51965C19125FB67FDD0D65 /* SplitFractionStore.swift */; };
 		1A0E62085750C88152F8CC5C /* WritParser in Frameworks */ = {isa = PBXBuildFile; productRef = 9D1C1D290F32664F3517610B /* WritParser */; };
 		1E23673ECDAB6E6123601FB8 /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0C52F8BA0DC0FE76663E586 /* PreviewViewController.swift */; };
 		1F8E161D4BA0E5E9CFE7B66D /* PreferencesWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2933C143FF2C4500A3221AA /* PreferencesWindowController.swift */; };
@@ -36,10 +37,12 @@
 		87C3F3471E2E1CE1A836B3AC /* BenchmarkMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9415828D24D49FB6197D8058 /* BenchmarkMode.swift */; };
 		89ECE445DC1E8D22ECBE0822 /* PlantUMLSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 091EC1BDB1F2F265576D292A /* PlantUMLSettings.swift */; };
 		8F45846B1CC54AB36B5B7CCE /* FolderWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29C7553F3FD0C71ED1DD4399 /* FolderWindowController.swift */; };
+		9BAE539747BE647C12096E0B /* SplitFractionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C51965C19125FB67FDD0D65 /* SplitFractionStore.swift */; };
 		9C28B6F18AA7054873107132 /* DocumentWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444A26971656B0AEFB26BD83 /* DocumentWindowController.swift */; };
 		9E202585AC17AA70573A3361 /* OneShotWaitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F27EEFFB4DFF3F0FD209234 /* OneShotWaitTests.swift */; };
 		A231924C20A9D5C1CA5ED7C5 /* OutlineSidebarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294596CB0941A4D295068ABD /* OutlineSidebarController.swift */; };
 		A65F6DF0AC798F885F903B8C /* MarkdownSyntaxHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7012D2ED723168B40A5896D3 /* MarkdownSyntaxHighlighter.swift */; };
+		A66CA80ACB38702EAA535D37 /* SplitFractionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E85CB5F01F616DDDF26F35 /* SplitFractionStoreTests.swift */; };
 		AAD8E876A1604CCB8F4A14E0 /* CustomCSSWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C473E214C8A2CB94369E52A4 /* CustomCSSWatcher.swift */; };
 		AAE1490CBCC16B2FB159AD1E /* FolderNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE71EB8B36700B9DF7D29C14 /* FolderNode.swift */; };
 		B1C9D1BF1E97D09E458A8FA7 /* WritTextViewBlockGestureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35E3DFEDBD5FBB63E9516A6C /* WritTextViewBlockGestureTests.swift */; };
@@ -80,6 +83,7 @@
 		5F8FAFDA6A8DE6A8DEB0AFAC /* BlockSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockSelectionTests.swift; sourceTree = "<group>"; };
 		60D372EF9107C521E8101EC9 /* WritParser */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WritParser; path = Packages/WritParser; sourceTree = SOURCE_ROOT; };
 		66737E1A6880E0705C024D29 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		6C51965C19125FB67FDD0D65 /* SplitFractionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitFractionStore.swift; sourceTree = "<group>"; };
 		7012D2ED723168B40A5896D3 /* MarkdownSyntaxHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownSyntaxHighlighter.swift; sourceTree = "<group>"; };
 		7553F3B1F2B20900AF057351 /* WritRender */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WritRender; path = Packages/WritRender; sourceTree = SOURCE_ROOT; };
 		7884DD9BF7D3534E92A552C2 /* PreviewTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewTheme.swift; sourceTree = "<group>"; };
@@ -96,6 +100,7 @@
 		B9093651302AA59F30B19A9E /* WritCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WritCore; path = Packages/WritCore; sourceTree = SOURCE_ROOT; };
 		C473E214C8A2CB94369E52A4 /* CustomCSSWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomCSSWatcher.swift; sourceTree = "<group>"; };
 		D0C52F8BA0DC0FE76663E586 /* PreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewViewController.swift; sourceTree = "<group>"; };
+		D3E85CB5F01F616DDDF26F35 /* SplitFractionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitFractionStoreTests.swift; sourceTree = "<group>"; };
 		D8D5CAC8F5EEBEDFC1AC23AD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E186FD7A9A520EC00B5E1CF5 /* EditorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewController.swift; sourceTree = "<group>"; };
 		EB2CFAF84DB2F8274AC9E66F /* Writ.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Writ.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -219,6 +224,7 @@
 				2F27EEFFB4DFF3F0FD209234 /* OneShotWaitTests.swift */,
 				F23AF647CA2124450009D3E9 /* PlantUMLSettingsTests.swift */,
 				7D5F56B232F3D322C3567106 /* PrintCompletionHandlerTests.swift */,
+				D3E85CB5F01F616DDDF26F35 /* SplitFractionStoreTests.swift */,
 				35E3DFEDBD5FBB63E9516A6C /* WritTextViewBlockGestureTests.swift */,
 				0BDC632D8FFF9932D91B6028 /* WritTextViewBlockSelectionTests.swift */,
 				01CB29265B01A93A452C36B3 /* WritTextViewHarness.swift */,
@@ -267,6 +273,7 @@
 				294596CB0941A4D295068ABD /* OutlineSidebarController.swift */,
 				F2933C143FF2C4500A3221AA /* PreferencesWindowController.swift */,
 				7F0570CDF2A94F7B7C17D1E3 /* RecentDocumentsMenuDelegate.swift */,
+				6C51965C19125FB67FDD0D65 /* SplitFractionStore.swift */,
 				90C8425E96FA6F2720086EC2 /* StatusBarViewController.swift */,
 			);
 			path = App;
@@ -386,6 +393,8 @@
 				2982F9AE4C8F39C67B104898 /* PlantUMLSettingsTests.swift in Sources */,
 				398C6F5AFDE4A53DC6DF4603 /* PrintCompletionHandler.swift in Sources */,
 				6E252A1BE2747387F4ACAEB8 /* PrintCompletionHandlerTests.swift in Sources */,
+				9BAE539747BE647C12096E0B /* SplitFractionStore.swift in Sources */,
+				A66CA80ACB38702EAA535D37 /* SplitFractionStoreTests.swift in Sources */,
 				22FE40766F76EB7AB31EC76A /* WritTextView.swift in Sources */,
 				B1C9D1BF1E97D09E458A8FA7 /* WritTextViewBlockGestureTests.swift in Sources */,
 				DADDC67F196018881C75CFF2 /* WritTextViewBlockSelectionTests.swift in Sources */,
@@ -421,6 +430,7 @@
 				1E23673ECDAB6E6123601FB8 /* PreviewViewController.swift in Sources */,
 				3840A93B0F5033A472549C78 /* PrintCompletionHandler.swift in Sources */,
 				0914C39A34AA98186F002441 /* RecentDocumentsMenuDelegate.swift in Sources */,
+				16DA4DFDC390F90BC38998AC /* SplitFractionStore.swift in Sources */,
 				37DEB3D3E192711846D00B4D /* StatusBarViewController.swift in Sources */,
 				6DAAD2A704A27BA007924FFC /* WritDocSchemeHandler.swift in Sources */,
 				BE8235227E6A5E5C2798F801 /* WritDocument.swift in Sources */,
