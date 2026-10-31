@@ -508,10 +508,13 @@ instead, regenerate, and commit both.
      interchangeable: one signs for the Store, the other for distribution
      outside it.
    - **Post-Actions** — and in particular, do **not** add **Notarize**. It
-     looks like something a macOS release ought to have, but notarization
-     belongs to the DMG channel and happens locally; asking for it here makes
-     Xcode Cloud export a Developer-ID-signed copy, which needs a certificate
-     it does not have. See §8.
+     looks like something a macOS release ought to have, and it is the one
+     mistake that actually broke this pipeline (confirmed, 2026-10-31).
+     Notarization belongs to the DMG channel and happens locally; a Store
+     submission is validated and signed by Apple on ingest. Asking for it here
+     makes Xcode Cloud export a Developer-ID-signed copy as well, which needs a
+     certificate cloud signing does not have, and the whole build fails on that
+     export. See §8.
    - **Post-Actions** — none, for a first submission. The build lands in App
      Store Connect and gets attached to the version by hand, which is one fewer
      moving part while establishing that the pipeline works. TestFlight can come
@@ -582,13 +585,25 @@ was TestFlight — and for macOS a developer-id export can appear alongside them
 So the step's name identifies which export failed, not what the workflow asked
 for.
 
-What most plausibly pulls it in is a **Notarize post-action**. Notarizing
-requires a Developer-ID-signed build, so adding it makes Xcode Cloud export one,
-and that export fails when the cloud has no Developer ID certificate to sign
-with. Writ does not need it: `make-release.sh` notarizes the DMG locally with
-the `writ-notary` keychain profile (§2). Remove the Notarize post-action and the
-developer-id export has no reason to run. This rests on a single anecdotal
-report, so confirm it against the log below rather than assuming it.
+**Confirmed cause: a Notarize post-action.** This was first recorded here as
+the most plausible explanation resting on a single anecdotal report. It has
+since been confirmed on this project — the owner had a Notarize post-action
+configured on the Distribution workflow, removing it was the fix, and the
+developer-id export stopped running.
+
+The mechanism: notarization requires a Developer-ID-signed build, so asking for
+it makes Xcode Cloud export one *in addition to* the app-store export it was
+configured for. That extra export then fails, because cloud signing holds Apple
+Distribution and Mac Installer Distribution certificates and no Developer ID
+Application certificate — there is nothing for it to sign with. The archive the
+workflow actually wanted was fine; a post-action nobody needed is what failed.
+
+**An App Store build does not need notarizing at all.** Apple validates and
+signs Store submissions during ingest; notarization is Gatekeeper's mechanism
+for software distributed *outside* the Store. Writ's notarized artifact is the
+DMG, which `Scripts/make-release.sh` produces locally with the `writ-notary`
+keychain profile (§2). Adding Notarize to a Store workflow buys nothing and
+costs the whole build.
 
 **Exit 70 is only a wrapper** — `xcodebuild`'s generic distribution failure. It
 carries no diagnostic information at all, and the step's own output carries
