@@ -261,4 +261,5 @@ Writ is local-first:
 - [M0 decisions and baseline](docs/03-M0-DECISIONS.md)
 - [Block (rectangular) selection](docs/06-BLOCK-SELECTION.md)
 - [Mac App Store submission](docs/07-APP-STORE.md)
+- [App Store Connect metadata](docs/08-APP-STORE-METADATA.md)
 - [Implementation TODO](TODO.md)
