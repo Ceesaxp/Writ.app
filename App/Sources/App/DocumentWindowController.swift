@@ -23,21 +23,9 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
     }
 
-    /// UserDefaults-backed divider fraction (editor width / editing-area
-    /// width) for split mode. Replaces `NSSplitView.autosaveName`, which
-    /// crashed on macOS Sequoia when display geometry changed during sleep
-    /// (`-[__NSSetM copy]` from inside `_autosaveSubviewLayoutIfNecessary`,
-    /// reproducer 2026-06-10 wake-up crash).
-    private static let splitFractionDefaultsKey = "WritEditorPreviewSplitFraction"
-    static var editorPreviewSplitFraction: Double {
-        get {
-            let v = UserDefaults.standard.double(forKey: splitFractionDefaultsKey)
-            return v > 0 ? v : 0.5
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: splitFractionDefaultsKey)
-        }
-    }
+    /// Holds the editor/preview divider fraction. Per window, though the
+    /// fraction it reads and writes is shared across windows.
+    private let splitFraction = SplitFractionStore()
 
     let editor: EditorViewController
     let preview: PreviewViewController
@@ -75,7 +63,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         // Deliberately no `autosaveName` — AppKit's NSSplitView autosave
         // path crashes on macOS Sequoia when display configuration changes
         // during sleep/wake. We persist the divider fraction ourselves via
-        // `editorPreviewSplitFraction` and the resize notification below.
+        // `SplitFractionStore` and the resize notification below.
 
         let outlineItem = NSSplitViewItem(sidebarWithViewController: outline)
         outlineItem.minimumThickness = 180
@@ -239,10 +227,10 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         let previewItem = splitController.splitViewItems[2]
         let editorWidth = editorItem.viewController.view.bounds.width
         let previewWidth = previewItem.viewController.view.bounds.width
-        let editingAreaWidth = editorWidth + previewWidth
-        guard editingAreaWidth > 0,
-              editorWidth > 0, previewWidth > 0 else { return }
-        Self.editorPreviewSplitFraction = Double(editorWidth / editingAreaWidth)
+        splitFraction.splitDidResize(
+            editorWidth: Double(editorWidth),
+            previewWidth: Double(previewWidth)
+        )
     }
 
     override func windowDidLoad() {
@@ -274,7 +262,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             editorItem.viewController.view.bounds.width
             + previewItem.viewController.view.bounds.width
         guard editingAreaWidth > 0 else { return }
-        let fraction = Self.editorPreviewSplitFraction
+        let fraction = splitFraction.stored
         let outlineWidth = splitController.splitViewItems[0].viewController.view.bounds.width
         let dividerOffset = outlineWidth + editingAreaWidth * CGFloat(fraction)
         split.setPosition(dividerOffset, ofDividerAt: 1)
