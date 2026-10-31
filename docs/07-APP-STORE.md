@@ -502,6 +502,16 @@ instead, regenerate, and commit both.
      **Release**, and **Deployment Preparation: App Store Connect**. That last
      setting is what makes the archive sign for distribution and upload; an
      Archive action without it produces a build you cannot submit.
+     **"Developer ID" is also offered there, and it is not what this workflow
+     wants** — it is the DMG channel's output, which `Scripts/make-release.sh`
+     already builds and notarizes locally. The two preparations are not
+     interchangeable: one signs for the Store, the other for distribution
+     outside it.
+   - **Post-Actions** — and in particular, do **not** add **Notarize**. It
+     looks like something a macOS release ought to have, but notarization
+     belongs to the DMG channel and happens locally; asking for it here makes
+     Xcode Cloud export a Developer-ID-signed copy, which needs a certificate
+     it does not have. See §8.
    - **Post-Actions** — none, for a first submission. The build lands in App
      Store Connect and gets attached to the version by hand, which is one fewer
      moving part while establishing that the pipeline works. TestFlight can come
@@ -560,6 +570,102 @@ version in the built `Info.plist` before archiving again.
 `CURRENT_PROJECT_VERSION` is at or below a number App Store Connect has already
 seen. Bump it past the highest number ever uploaded, not merely past the last
 one you remember submitting.
+
+### Xcode Cloud: `Export archive for developer-id distribution` fails, exit 70
+
+**A developer-id export step does not mean Deployment Preparation is set to
+Developer ID.** That inference was made here and was wrong: the step appeared
+on a workflow whose Archive action was set to *App Store Connect*. Xcode Cloud
+runs more than one export per archive — a community report shows development,
+ad-hoc and app-store exports all running on a workflow whose only post-action
+was TestFlight — and for macOS a developer-id export can appear alongside them.
+So the step's name identifies which export failed, not what the workflow asked
+for.
+
+What most plausibly pulls it in is a **Notarize post-action**. Notarizing
+requires a Developer-ID-signed build, so adding it makes Xcode Cloud export one,
+and that export fails when the cloud has no Developer ID certificate to sign
+with. Writ does not need it: `make-release.sh` notarizes the DMG locally with
+the `writ-notary` keychain profile (§2). Remove the Notarize post-action and the
+developer-id export has no reason to run. This rests on a single anecdotal
+report, so confirm it against the log below rather than assuming it.
+
+**Exit 70 is only a wrapper** — `xcodebuild`'s generic distribution failure. It
+carries no diagnostic information at all, and the step's own output carries
+none either. The real error is in the artifact the failing command names
+itself:
+
+```
+-IDEDistributionLogDirectory=/Volumes/workspace/tmp/developer-id-export-archive-logs
+```
+
+Download the build's artifacts and read
+`developer-id-export-archive-logs/xcodebuild-export-archive.log`. Start there,
+before changing any setting — every other step in this entry is guesswork until
+that log is read.
+
+#### The cause here: a local certificate is invisible to cloud signing
+
+The log said:
+
+```
+error: exportArchive No signing certificate "Developer ID Application" found
+  No "Developer ID Application" signing certificate matching team ID
+  "Q34D9AYJ95" with a private key was found.
+```
+
+**"with a private key" is the operative phrase.** The team *does* have a
+Developer ID Application certificate — `security find-identity -v -p codesigning`
+lists it on the release Mac, and `make-release.sh` signs the DMG with it every
+release. But it was created on that Mac, so its private key is in that login
+keychain and nowhere else. Xcode Cloud signs on Apple's hardware and can only
+use a certificate whose key it holds, meaning a cloud-managed one. A perfectly
+valid local certificate is invisible to it, which is why the error can look
+absurd while being accurate.
+
+Two ways out, and for Writ the first is usually right:
+
+1. **Do not export for Developer ID at all.** Writ's Developer ID artifact is
+   the notarized DMG, built locally by `make-release.sh`. If the workflow has a
+   **Notarize** post-action, remove it: notarizing requires a
+   Developer-ID-signed build, so it is the likely reason this export runs. The
+   App Store export does not need it.
+2. **Give Xcode Cloud its own Developer ID certificate.** Under automatic
+   signing Xcode creates one when needed: Settings → Accounts → the team →
+   Manage Certificates → + → Developer ID Application. Only the **Account
+   Holder** can create Developer ID certificates.
+
+> **Do not apply the "revoke the managed certificate" fix below to the local
+> `Developer ID Application: Andrei Popov (Q34D9AYJ95)` certificate.**
+> `make-release.sh` signs every DMG with it, and Developer ID certificates are
+> team-wide and limited in number. Revoking it to clear a cloud-signing error
+> would break the release channel that works in order to fix the one that does
+> not. That advice applies only to certificates whose name contains
+> **"Managed (Xcode Cloud)"**.
+
+A post-build script in Xcode Cloud never receives the signing key, so the DMG
+cannot be built and signed there even once a cloud Developer ID certificate
+exists. Moving the DMG channel into Xcode Cloud is therefore not a small
+change, and is not attempted here.
+
+#### Other reported causes
+
+Three causes reported for exit 70 at the export step, once the log names one:
+
+| Log says | Reported fix |
+| --- | --- |
+| no signing certificate found | Revoke the matching **"… Managed (Xcode Cloud)"** certificate in the [portal](https://developer.apple.com/account/resources/certificates/list) and re-run; Xcode Cloud regenerates it. Several people report this as the fix, with no confirmed root cause. |
+| a bundle ID could not be registered | Archive once from Xcode and upload it, which creates the identifier, then return to Xcode Cloud. |
+| an authentication error on a recent Xcode | One report of export failing on Xcode 26.2 RC and succeeding on 26.1. Pin the workflow's Xcode version — but never to a beta (above). |
+
+Sources: Apple Developer Forums
+[816085](https://developer.apple.com/forums/thread/816085) (multiple export
+steps, managed signing),
+[772909](https://developer.apple.com/forums/thread/772909) (certificate
+revocation),
+[766079](https://developer.apple.com/forums/thread/766079) (unregistered bundle
+ID), [810011](https://developer.apple.com/forums/thread/810011) (Xcode version
+regression).
 
 ### "Invalid toolchain" / beta SDK rejection
 
