@@ -17,6 +17,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Pin the full certificate common name. Two `Developer ID Application`
+# certificates share team Q34D9AYJ95 — the pre-migration personal one and the
+# IPAP TECH LTD organisation one — so the bare "Developer ID Application"
+# prefix is ambiguous and codesign aborts. 0.7.0 onwards signs as the
+# organisation, which is also what Apple validates the App Store build under.
+SIGN_IDENTITY="Developer ID Application: IPAP TECH LTD (Q34D9AYJ95)"
+
 NOTARIZE=0
 for arg in "$@"; do
   case "$arg" in
@@ -48,6 +55,18 @@ xcodebuild \
   -exportOptionsPlist Scripts/ExportOptions-DeveloperID.plist | tail -3
 
 APP=build/Writ-export/Writ.app
+
+# Xcode picks the certificate itself under automatic signing, so verify rather
+# than assume: a second Developer ID cert on the same team is enough to change
+# the publisher name users see, silently.
+APP_AUTHORITY=$(codesign -dvv "$APP" 2>&1 | sed -n 's/^Authority=\(Developer ID Application.*\)$/\1/p' | head -1)
+if [ "$APP_AUTHORITY" != "$SIGN_IDENTITY" ]; then
+  echo "error: exported app is signed by '$APP_AUTHORITY'," >&2
+  echo "       expected '$SIGN_IDENTITY'." >&2
+  exit 1
+fi
+echo "==> App signed by: $APP_AUTHORITY"
+
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 DMG="build/Writ-${VERSION}.dmg"
 VOLNAME="Writ ${VERSION}"
@@ -130,7 +149,7 @@ rm -f "$RW_DMG"
 
 # Sign the DMG itself so Gatekeeper accepts it.
 echo "==> Signing DMG..."
-codesign --sign "Developer ID Application" --timestamp "$DMG"
+codesign --sign "$SIGN_IDENTITY" --timestamp "$DMG"
 
 # Verify
 codesign --verify --deep --strict --verbose=2 "$APP" | tail -3
