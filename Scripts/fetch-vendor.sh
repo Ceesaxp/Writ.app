@@ -9,7 +9,7 @@ mkdir -p "$VENDOR"/{katex/contrib,katex/fonts,mathjax,mermaid,highlight}
 
 KATEX_VERSION="0.16.11"
 MATHJAX_VERSION="3.2.2"
-MERMAID_VERSION="11.4.1"
+MERMAID_VERSION="11.17.2"
 HLJS_VERSION="11.10.0"
 
 fetch() {
