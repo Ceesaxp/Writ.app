@@ -520,7 +520,17 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     if (window.mermaid) {
-      window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default" });
+      window.mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "default",
+        // Without this, a failed parse leaves Mermaid's error diagram
+        // (the "bomb") in document.body forever: it draws the error, then
+        // throws before reaching its own removeTempElements(). Setting it
+        // makes Mermaid clean up and rethrow, so renderMermaid's catch
+        // shows the inline .writ-mermaid-error instead.
+        suppressErrorRendering: true,
+      });
     }
     announceReady();
   });
@@ -529,7 +539,17 @@
   // the time this script is executed (cold WebKit warm-up edge case).
   if (document.readyState === "interactive" || document.readyState === "complete") {
     if (window.mermaid) {
-      window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default" });
+      window.mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "default",
+        // Without this, a failed parse leaves Mermaid's error diagram
+        // (the "bomb") in document.body forever: it draws the error, then
+        // throws before reaching its own removeTempElements(). Setting it
+        // makes Mermaid clean up and rethrow, so renderMermaid's catch
+        // shows the inline .writ-mermaid-error instead.
+        suppressErrorRendering: true,
+      });
     }
     announceReady();
   }
